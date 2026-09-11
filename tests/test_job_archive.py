@@ -85,3 +85,29 @@ def test_job_archive_engine(tmp_path: Path):
     # Verify QA Memory saved
     ans = storage.get_qa_answer("Notice Period?")
     assert ans == "1 month"
+
+
+def test_job_archive_ssrf_protection(tmp_path: Path):
+    """Verify that private IP / loopback / metadata URLs are rejected by SSRF guard."""
+    from src.tools.archive.url_guard import is_safe_url
+
+    assert is_safe_url("http://127.0.0.1:8765/api/v1/auth/pair") is False
+    assert is_safe_url("http://localhost:8080") is False
+    assert is_safe_url("http://169.254.169.254/latest/meta-data") is False
+    assert is_safe_url("http://10.0.0.1/admin") is False
+    assert is_safe_url("http://192.168.1.1/secret") is False
+    assert is_safe_url("file:///etc/passwd") is False
+
+    storage = JobAgentStorage(db_path=str(tmp_path / "test_ssrf.db"))
+    engine = JobArchiveEngine(storage=storage)
+    engine.archive_dir = tmp_path / "archives"
+    engine.archive_dir.mkdir(parents=True, exist_ok=True)
+
+    # Calling archive with an SSRF URL should reject snapshot generation
+    res = engine.archive(
+        company="EvilCorp",
+        role="Hacker",
+        job_url="http://127.0.0.1:8765/api/v1/auth/pair",
+    )
+    assert res["snapshot_pdf_path"] is None
+

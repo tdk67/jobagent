@@ -3,7 +3,7 @@
 import json
 
 from pathlib import Path
-from src.core.storage import UNKNOWN_ROLE, JobAgentStorage
+from src.core.storage import UNKNOWN_ROLE, JobAgentStorage, parse_flexible_date
 
 
 def test_storage_crud(tmp_path: Path):
@@ -24,7 +24,7 @@ def test_storage_crud(tmp_path: Path):
     # 2. Query application
     app = storage.get_application_by_company("Acme Corp")
     assert app is not None
-    assert app["company"] == "Acme Corp"
+    assert app["company"] == "Acme"
     assert app["role"] == "Senior Python Engineer"
     assert app["status"] == "Applied"
 
@@ -72,7 +72,7 @@ def test_storage_crud(tmp_path: Path):
     summary = storage.export_summary_json()
     assert summary["total_count"] == 1
     assert len(summary["applications"]) == 1
-    assert summary["applications"][0]["company"] == "Acme Corp"
+    assert summary["applications"][0]["company"] == "Acme"
     assert summary["applications"][0]["location"] == "Frankfurt am Main"
 
     # 7. Test application without location defaults to neutral marker "—"
@@ -159,3 +159,24 @@ def test_import_from_summary_interviews_use_unknown_role_placeholder(tmp_path: P
     interviews = storage.list_interviews()
     assert interviews
     assert interviews[0]["role"] == UNKNOWN_ROLE
+
+
+def test_parse_flexible_date_valid_and_invalid():
+    """Verify parse_flexible_date parses known patterns and returns None on unparseable garbage."""
+    # Valid formats
+    assert parse_flexible_date("2026-07-01") == "2026-07-01"
+    assert parse_flexible_date("01.07.2026") == "2026-07-01"
+    assert parse_flexible_date("1.7.2026") == "2026-07-01"
+    assert parse_flexible_date("1-Jul-2026") == "2026-07-01"
+    assert parse_flexible_date("1 July 2026") == "2026-07-01"
+
+    # Empty / None
+    assert parse_flexible_date(None) is None
+    assert parse_flexible_date("") is None
+    assert parse_flexible_date("   ") is None
+
+    # Unparseable garbage should return None, NOT truncated garbage strings (C15 fix)
+    assert parse_flexible_date("unparseable_garbage") is None
+    assert parse_flexible_date("invalid-date-string") is None
+    assert parse_flexible_date("abcdefghijklmnop") is None
+

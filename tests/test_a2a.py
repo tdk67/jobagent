@@ -65,6 +65,16 @@ def test_a2a_server_endpoints(tmp_path: Path):
     status_data = res_status.json()
     assert status_data["statistics"]["total_applications"] == 1
 
+    # 4b. Verify query string token ?token= is rejected (P1 security fix)
+    query_token_res = client.get(f"/a2a/v1/status?token={token}")
+    assert query_token_res.status_code == 401
+
+    # 4c. Verify GET /dashboard serves clean HTML dashboard
+    dash_res = client.get("/dashboard")
+    assert dash_res.status_code == 200
+    assert "text/html" in dash_res.headers["content-type"]
+    assert "JobAgent Career Analytics" in dash_res.text
+
     # 5. Delegate task: get_status
     task_payload = {
         "source_agent": "hermes",

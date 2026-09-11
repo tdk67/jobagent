@@ -34,9 +34,13 @@ class FormReasoner:
         self.config = config or load_config()
         self.storage = storage or JobAgentStorage(self.config.storage.database_path)
         self.profile = profile or load_profile()
+        self._seeded = False
 
-        # Seed QA memory with profile answers if empty
-        self.storage.seed_qa_from_profile(self.profile)
+    def ensure_qa_seeded(self) -> None:
+        """Lazily seeds QA memory with profile answers if not already done (avoids __init__ side-effects)."""
+        if not self._seeded:
+            self.storage.seed_qa_from_profile(self.profile)
+            self._seeded = True
 
     def _match_core_profile(self, field: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Fast-path deterministic resolution for standard contact & personal fields."""
@@ -138,6 +142,7 @@ class FormReasoner:
 
     def reason_form(self, fields: List[Dict[str, Any]], page_url: Optional[str] = None) -> Dict[str, Any]:
         """Maps form fields using 2-pass strategy: Local Heuristics & QA Memory -> Multimodal Gemini 3.8 Flash."""
+        self.ensure_qa_seeded()
         approved_mappings: Dict[str, Any] = {}
         unmapped_fields: List[Dict[str, Any]] = []
         reasonings: Dict[str, str] = {}

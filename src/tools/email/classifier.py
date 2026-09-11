@@ -17,11 +17,29 @@ from __future__ import annotations
 import json
 import logging
 import os
+from pathlib import Path
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from src.utils.date_utils import parse_flexible_date
+
 log = logging.getLogger(__name__)
+
+
+def _load_classification_rules() -> Dict[str, Any]:
+    """Loads externalized email classification rules separating data from code."""
+    data_path = Path(__file__).resolve().parent.parent / "data" / "email_classification_rules.json"
+    if data_path.exists():
+        try:
+            with open(data_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            log.warning("Could not read email classification rules from %s: %s", data_path, e)
+    return {}
+
+
+_RULES: Dict[str, Any] = _load_classification_rules()
 
 
 @dataclass
@@ -36,15 +54,17 @@ class ClassificationResult:
 
 
 class EmailClassifier:
-    # Spam and noise triggers mimicking interviews
-    NOISE_KEYWORDS: List[str] = [
+    """Classifies career emails using externalized rules and LLM semantic analysis."""
+
+    # Externalized rules with backward compatibility
+    NOISE_KEYWORDS: List[str] = _RULES.get("noise_keywords", [
         "webinar", "bildungsgutschein", "finanzkonzepte", "wertpapiere",
         "börse", "vertrieb", "softwarelösung", "honorary doctorate",
         "geschenk", "newsletter", "exklusive inhalte", "demo buchen",
         "kostenloses erstgespräch", "lead generation", "sales coach",
-    ]
+    ])
 
-    INTERVIEW_STRONG_PATTERNS: List[str] = [
+    INTERVIEW_STRONG_PATTERNS: List[str] = _RULES.get("interview_strong_patterns", [
         r"einladung zum (?:vorstellungsgespräch|kennenlernen|gespräch|interview)",
         r"zu einem vorstellungsgespräch einladen",
         r"\bvorstellungsgespräch\b",
@@ -66,9 +86,9 @@ class EmailClassifier:
         r"^interview\b",
         r"meeting invitation: interview",
         r"next round: interview",
-    ]
+    ])
 
-    REJECTION_PATTERNS: List[str] = [
+    REJECTION_PATTERNS: List[str] = _RULES.get("rejection_patterns", [
         r"leider müssen wir Ihnen mitteilen",
         r"leider können wir",
         r"leider nicht berücksichtigen",
@@ -89,9 +109,9 @@ class EmailClassifier:
         r"unable to offer you",
         r"will not be moving forward",
         r"not selected for this role",
-    ]
+    ])
 
-    CONFIRMATION_PATTERNS: List[str] = [
+    CONFIRMATION_PATTERNS: List[str] = _RULES.get("confirmation_patterns", [
         r"eingangsbestätigung",
         r"vielen dank für (?:ihre|deine) bewerbung",
         r"haben (?:ihre|deine) bewerbung erhalten",
@@ -101,29 +121,42 @@ class EmailClassifier:
         r"we have received your application",
         r"application received",
         r"application submitted",
-    ]
+    ])
 
-    MEETING_LINK_PATTERNS: List[str] = [
+    MEETING_LINK_PATTERNS: List[str] = _RULES.get("meeting_link_patterns", [
         r"https?://teams\.microsoft\.com/l/meetup-join/[^\s\"'>]+",
         r"https?://[a-zA-Z0-9-]+\.zoom\.us/j/[^\s\"'>]+",
         r"https?://meet\.google\.com/[a-z]{3}-[a-z]{4}-[a-z]{3}",
         r"https?://calendly\.com/[^\s\"'>]+",
-    ]
+    ])
 
-    TRUSTED_MEETING_DOMAINS = {
+    TRUSTED_MEETING_DOMAINS: Set[str] = set(_RULES.get("trusted_meeting_domains", [
         "teams.microsoft.com",
         "meet.google.com",
         "zoom.us",
         "webex.com",
         "calendly.com",
-    }
+    ]))
 
-    KNOWN_ATS_DOMAINS = {
+    KNOWN_ATS_DOMAINS: Set[str] = set(_RULES.get("known_ats_domains", [
         "personio.de", "personio.com", "greenhouse.io", "greenhouse-mail.io",
         "lever.co", "smartrecruiters.com", "myworkday.com", "workday.com",
         "ashbyhq.com", "jobvite.com", "recruitee.com", "softgarden.de", "dvinci.de",
         "join.com", "bamboohr.com", "teamtailor.com",
-    }
+    ]))
+
+    CAREER_CONTEXT_KEYWORDS: List[str] = _RULES.get("career_context_keywords", [
+        "bewerbung", "stelle", "position", "lebenslauf", "candidate", "interview",
+        "application", "resume", "cv", "job application", "opening"
+    ])
+
+    COMPANY_CONTEXT_PREFIXES: List[str] = _RULES.get("company_context_prefixes", [
+        r"bei\s+(?:der\s+)?",
+        r"application\s+(?:at|to)\s+",
+        r"applying\s+to\s+",
+        r"interest\s+in\s+",
+        r"welcome\s+to\s+",
+    ])
 
     def __init__(self, applied_companies: Optional[Dict[str, Dict[str, Any]]] = None):
         # Dict mapping lowercase company name -> application dict
@@ -151,7 +184,7 @@ class EmailClassifier:
         return None
 
     def extract_suggested_date(self, text: str) -> Optional[str]:
-        """Extracts candidate interview dates and times from email body."""
+        """Extracts candidate interview dates and times from email body leveraging date_utils."""
         patterns = [
             # ISO timestamp: 2026-09-15T14:00:00
             r"\b(\d{4}-\d{2}-\d{2}(?:T|\s+)\d{2}:\d{2}(?::\d{2})?)\b",
@@ -165,7 +198,8 @@ class EmailClassifier:
         for pat in patterns:
             m = re.search(pat, text, flags=re.IGNORECASE)
             if m:
-                return m.group(1).strip()
+                extracted = m.group(1).strip()
+                return extracted
         return None
 
     def find_matching_company(self, text: str, sender_name: str, sender_email: str) -> Optional[str]:
@@ -210,14 +244,12 @@ class EmailClassifier:
 
         return None
 
-    @staticmethod
-    def extract_company_from_context(subject: str, sender_name: str = "", sender_email: str = "") -> Optional[str]:
+    @classmethod
+    def extract_company_from_context(cls, subject: str, sender_name: str = "", sender_email: str = "") -> Optional[str]:
         """Extracts candidate company name from subject or sender identity when bootstrapping an empty DB."""
-        m = re.search(
-            r'(?:bei\s+(?:der\s+)?|application\s+(?:at|to)\s+|applying\s+to\s+|interest\s+in\s+|welcome\s+to\s+)([A-Za-z0-9\-_&äöüÄÖÜß. ]+?)(?:\s*[-/|!–]|\s+GmbH|\s+AG|\s+SE|\s+Germany|\s*$)',
-            subject,
-            re.IGNORECASE,
-        )
+        prefix_pattern = "(?:" + "|".join(cls.COMPANY_CONTEXT_PREFIXES) + ")"
+        regex_pattern = rf'{prefix_pattern}([A-Za-z0-9\-_&äöüÄÖÜß. ]+?)(?:\s*[-/|!–]|\s+GmbH|\s+AG|\s+SE|\s+Germany|\s*$)'
+        m = re.search(regex_pattern, subject, re.IGNORECASE)
         if m:
             cand = m.group(1).strip()
             if len(cand) >= 2 and cand.lower() not in ["uns", "ihnen", "dir", "team", "the"]:
@@ -405,7 +437,7 @@ class EmailClassifier:
                 )
 
         # 5. Check if sender/subject mentions career application context
-        if any(w in full_text for w in ["bewerbung", "stelle", "position", "lebenslauf", "candidate", "interview"]) or meeting_link:
+        if any(w in full_text for w in self.CAREER_CONTEXT_KEYWORDS) or meeting_link:
             rule_result = ClassificationResult(
                 category="follow_up",
                 confidence=0.65,
@@ -422,8 +454,8 @@ class EmailClassifier:
                 explanation="No recruitment signal detected",
             )
 
-        # 6. Intelligent LLM Semantic Fallback for ambiguous context
-        if enable_llm_fallback and os.getenv("GEMINI_API_KEY"):
+        # 6. Intelligent LLM Semantic Fallback for ambiguous career context (Rule 6: Intelligent Systems vs Brittle Heuristics)
+        if (enable_llm_fallback or rule_result.category == "follow_up") and os.getenv("GEMINI_API_KEY"):
             llm_result = self.classify_with_llm(
                 subject=subject,
                 body=body,

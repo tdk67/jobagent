@@ -57,6 +57,54 @@ def test_email_classifier_cases():
     assert res_noise.category == "noise"
 
 
+def test_email_classifier_english_cases():
+    applied = {
+        "datadog": {"company": "Datadog", "role": "Site Reliability Engineer"},
+        "stripe": {"company": "Stripe", "role": "Staff Software Engineer"},
+    }
+    classifier = EmailClassifier(applied_companies=applied)
+
+    # 1. English Confirmation
+    res_conf = classifier.classify(
+        subject="Application received: Site Reliability Engineer",
+        body="Thank you for applying to Datadog. We have successfully received your application.",
+        sender_name="Datadog Careers",
+        sender_email="recruiting@datadog.com",
+    )
+    assert res_conf.category == "application_confirmation"
+    assert res_conf.matched_company == "Datadog"
+
+    # 2. English Rejection
+    res_rej = classifier.classify(
+        subject="Update on your application at Stripe",
+        body="Thank you for your interest. After careful consideration, we have decided to move forward with other candidates.",
+        sender_name="Stripe Talent",
+        sender_email="recruiting@stripe.com",
+    )
+    assert res_rej.category == "rejection"
+    assert res_rej.matched_company == "Stripe"
+
+    # 3. English Interview Invitation
+    res_int = classifier.classify(
+        subject="Invitation to interview: Staff Software Engineer",
+        body="We would like to invite you to an interview with our engineering team: https://meet.google.com/abc-defg-hij",
+        sender_name="Stripe Recruiting",
+        sender_email="recruiting@stripe.com",
+    )
+    assert res_int.category == "interview_invitation"
+    assert res_int.matched_company == "Stripe"
+    assert res_int.meeting_link == "https://meet.google.com/abc-defg-hij"
+
+    # 4. English Noise / Pitch
+    res_noise = classifier.classify(
+        subject="Exclusive webinar: Boost your sales pipelines!",
+        body="Book a demo now to access our lead generation services and financial planning tools.",
+        sender_name="Growth Outreach",
+        sender_email="growth@outreach-services.com",
+    )
+    assert res_noise.category == "noise"
+
+
 def test_email_ingest_engine_triage(tmp_path: Path):
     db_path = tmp_path / "test_ingest.db"
     storage = JobAgentStorage(db_path=str(db_path))

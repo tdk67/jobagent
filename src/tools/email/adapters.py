@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.header import decode_header
 from typing import Any, Dict, List, Optional, Union
-from src.core.storage import parse_flexible_date
+from src.utils.date_utils import parse_flexible_date
 
 log = logging.getLogger(__name__)
 

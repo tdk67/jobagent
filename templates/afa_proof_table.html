@@ -156,7 +156,13 @@
       <tr>
         <td class="center">{{ app.index }}</td>
         <td class="center">{{ app.applied_date }}</td>
-        <td><strong>{{ app.company }}</strong><br><span style="color:#555; font-size:10px;">{{ app.location }}</span></td>
+        <td>
+          <strong>{{ app.company }}</strong><br>
+          <span style="color:#555; font-size:10px;">{{ app.location }}</span>
+          {% if app.email_count and app.email_count > 1 %}
+            <br><span style="color:#666; font-size:9px;">({{ app.email_count }} Nachweise verknüpft)</span>
+          {% endif %}
+        </td>
         <td>{{ app.role }}</td>
         <td class="center">{{ app.source }}</td>
         <td>

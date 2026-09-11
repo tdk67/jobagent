@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from playwright.sync_api import sync_playwright
 
+from src.tools.archive.url_guard import is_safe_url
+
 
 class JobSnapshotter:
     """Headless browser snapshotter for visual PDF preservation."""
@@ -24,6 +26,8 @@ class JobSnapshotter:
         cleaned_url = url.strip()
         if not (cleaned_url.lower().startswith("http://") or cleaned_url.lower().startswith("https://")):
             raise ValueError(f"Security restriction: Only HTTP/HTTPS URLs are allowed for snapshotting, got: {url}")
+        if not is_safe_url(cleaned_url):
+            raise ValueError(f"Security restriction: URL rejected by SSRF guard: {url}")
 
         out_file = self.output_dir / output_filename
         out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -31,6 +35,19 @@ class JobSnapshotter:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
+
+            # SSRF TOCTOU guard (P4): intercept all subresources and redirects to verify safe destinations
+            def _ssrf_route_interceptor(route):
+                req_url = route.request.url.lower()
+                if req_url.startswith("data:") or req_url.startswith("blob:"):
+                    route.continue_()
+                    return
+                if not is_safe_url(route.request.url):
+                    route.abort("blockedbyclient")
+                    return
+                route.continue_()
+
+            page.route("**/*", _ssrf_route_interceptor)
             try:
                 page.goto(url, wait_until="networkidle", timeout=timeout_ms)
             except Exception:

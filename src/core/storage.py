@@ -12,9 +12,14 @@ import json
 import logging
 import re
 import sqlite3
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+
+from src.core.migrations import run_migrations
+from src.tools.email.normalizer import is_noise_company, normalize_company_name, normalize_role_title
+from src.tools.role_extractor import extract_role_from_context
+from src.utils.date_utils import parse_flexible_date
 
 log = logging.getLogger(__name__)
 
@@ -22,83 +27,6 @@ log = logging.getLogger(__name__)
 # fabricated real-sounding title: this value ends up in the statutory AfA
 # Eigenbemühungsnachweis, where invented data would be a compliance problem.
 UNKNOWN_ROLE = "Unbekannt (bitte prüfen)"
-
-# Subjects that must not trigger the role-parsing regex fallback (deceptive
-# sales pitches contain phrases like "für die Position", which are unrelated
-# to the actual job role).
-_NON_ROLE_SUBJECT_MARKERS = [
-    "webinar",
-    "netzwerk",
-    "bewerbungstraining",
-    "bildungsgutschein",
-    "fortbildung",
-    "coaching",
-    "workshop",
-    "jobalert",
-    "vertrieb und finanzkonzepte",
-    "match",
-    "exklusiv",
-    "sichern sie sich",
-    "platz sichern",
-]
-
-
-def parse_flexible_date(date_input: Optional[Any]) -> Optional[str]:
-    """Parses flexible human-entered date strings into ISO format YYYY-MM-DD.
-
-    Supports:
-    - '2026-07-01'
-    - '01.07.2026' or '1.7.2026'
-    - '1-Jul' or '01-Jul' (assumes current year, e.g. 2026)
-    - '1-Jul-2026' or '01-Jul-2026'
-    - '1 July 2026'
-    """
-    if not date_input:
-        return None
-    if isinstance(date_input, (datetime, date)):
-        return date_input.strftime("%Y-%m-%d")
-
-    s = str(date_input).strip()
-    if not s:
-        return None
-
-    # 1. ISO YYYY-MM-DD
-    m_iso = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})", s)
-    if m_iso:
-        y, m, d = int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3))
-        return f"{y:04d}-{m:02d}-{d:02d}"
-
-    # 2. European DD.MM.YYYY or DD.MM.
-    m_eu = re.match(r"^(\d{1,2})\.(\d{1,2})\.?(\d{2,4})?$", s)
-    if m_eu:
-        d, m = int(m_eu.group(1)), int(m_eu.group(2))
-        y = int(m_eu.group(3)) if m_eu.group(3) else datetime.now().year
-        if y < 100:
-            y += 2000
-        return f"{y:04d}-{m:02d}-{d:02d}"
-
-    # 3. 1-Jul or 1-Jul-2026 or 01-Jul-2026
-    month_map = {
-        "jan": 1, "feb": 2, "mar": 3, "mär": 3, "apr": 4, "may": 5, "mai": 5,
-        "jun": 6, "jul": 7, "aug": 8, "sep": 9, "oct": 10, "okt": 10, "nov": 11, "dec": 12, "dez": 12
-    }
-    m_text = re.match(r"^(\d{1,2})[-/\s]([a-zA-ZäöüÄÖÜ]{3,})[-/\s]?(\d{2,4})?$", s)
-    if m_text:
-        d = int(m_text.group(1))
-        mon_str = m_text.group(2).lower()[:3]
-        m = month_map.get(mon_str)
-        if m:
-            y = int(m_text.group(3)) if m_text.group(3) else datetime.now().year
-            if y < 100:
-                y += 2000
-            return f"{y:04d}-{m:02d}-{d:02d}"
-
-    try:
-        from dateutil import parser
-        parsed = parser.parse(s)
-        return parsed.strftime("%Y-%m-%d")
-    except Exception:
-        return s[:10]
 
 
 class JobAgentStorage:
@@ -113,80 +41,8 @@ class JobAgentStorage:
         return conn
 
     def _init_db(self) -> None:
-        """Initializes database tables if they do not exist."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS applications (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    company TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    applied_date TEXT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'Applied',
-                    source TEXT DEFAULT 'Direct',
-                    job_url TEXT,
-                    location TEXT,
-                    salary_info TEXT,
-                    notes TEXT,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS email_interactions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    application_id INTEGER,
-                    entry_id TEXT UNIQUE,
-                    sender_name TEXT,
-                    sender_email TEXT,
-                    subject TEXT,
-                    received_time TEXT,
-                    category TEXT NOT NULL,
-                    preview TEXT,
-                    confidence_score REAL DEFAULT 1.0,
-                    action_taken TEXT,
-                    FOREIGN KEY (application_id) REFERENCES applications (id)
-                )
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS interviews (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    application_id INTEGER,
-                    entry_id TEXT,
-                    company TEXT NOT NULL,
-                    role TEXT,
-                    interview_date TEXT,
-                    interview_type TEXT DEFAULT 'Phone Screen',
-                    meeting_link TEXT,
-                    status TEXT DEFAULT 'Scheduled',
-                    notes TEXT,
-                    FOREIGN KEY (application_id) REFERENCES applications (id)
-                )
-            """)
-            try:
-                cursor.execute("ALTER TABLE interviews ADD COLUMN entry_id TEXT")
-            except Exception:
-                pass
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS qa_memory (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    question_key TEXT UNIQUE,
-                    question_text TEXT NOT NULL,
-                    answer TEXT NOT NULL,
-                    category TEXT DEFAULT 'general',
-                    verified INTEGER DEFAULT 1,
-                    provenance TEXT DEFAULT 'user_verified',
-                    updated_at TEXT NOT NULL
-                )
-            """)
-            try:
-                cursor.execute("ALTER TABLE qa_memory ADD COLUMN provenance TEXT DEFAULT 'user_verified'")
-            except Exception:
-                pass
-            conn.commit()
+        """Initializes database tables using the versioned migration framework."""
+        run_migrations(self.db_path)
 
     def upsert_application(
         self,
@@ -199,32 +55,75 @@ class JobAgentStorage:
         location: Optional[str] = None,
         salary_info: Optional[str] = None,
         notes: Optional[str] = None,
-    ) -> int:
-        """Inserts or updates a job application by company and role."""
+    ) -> Optional[int]:
+        """Inserts or updates a job application with canonical company deduplication.
+        Filters aggregator noise (LinkedIn, BambooHR) and merges duplicate legal forms (GmbH, AG).
+        """
+        if is_noise_company(company):
+            log.debug("Filtered noise company entity: %r", company)
+            return None
+
+        canon_company = normalize_company_name(company) or company.strip()
+        cleaned_role = normalize_role_title(role)
+        canon_role = cleaned_role or role.strip()
+
+        if not canon_company:
+            return None
+
         now = datetime.now(timezone.utc).isoformat()
         app_date = applied_date or now
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            # Check existing
+            # 1. Exact canonical company match
             cursor.execute(
-                "SELECT id, status FROM applications WHERE LOWER(company) = LOWER(?) AND LOWER(role) = LOWER(?)",
-                (company.strip(), role.strip()),
+                "SELECT id, company, role, status, applied_date FROM applications WHERE LOWER(company) = LOWER(?)",
+                (canon_company,),
             )
-            row = cursor.fetchone()
-            if row:
+            rows = cursor.fetchall()
+
+            # 2. Fuzzy match stripping legal forms or prefix variants (e.g. "Ratbacher GmbH" vs "Ratbacher")
+            if not rows:
+                cursor.execute(
+                    "SELECT id, company, role, status, applied_date FROM applications WHERE LOWER(company) LIKE ? OR LOWER(?) LIKE LOWER(company) || '%'",
+                    (f"{canon_company.lower()}%", canon_company.lower()),
+                )
+                rows = cursor.fetchall()
+
+            if rows:
+                row = rows[0]
                 app_id = row["id"]
-                # Update status if new status is more specific (e.g. Interview or Rejected)
-                new_status = status if status != "Applied" else row["status"]
+                existing_role = row["role"]
+                existing_status = row["status"]
+                existing_applied_date = row["applied_date"]
+
+                # Upgrade role if existing is placeholder and new is concrete
+                new_role = existing_role
+                if (not normalize_role_title(existing_role)) and cleaned_role:
+                    new_role = cleaned_role
+
+                # Status progression: Interview > Rejected > Applied
+                new_status = existing_status
+                if status == "Interview":
+                    new_status = "Interview"
+                elif status == "Rejected" and existing_status != "Interview":
+                    new_status = "Rejected"
+
+                # Keep earliest valid applied_date
+                earliest_date = existing_applied_date
+                if applied_date and (not existing_applied_date or applied_date < existing_applied_date):
+                    earliest_date = applied_date
+
                 cursor.execute(
                     """
                     UPDATE applications 
-                    SET status = ?, source = COALESCE(?, source), job_url = COALESCE(?, job_url),
+                    SET company = ?, role = ?, status = ?, applied_date = ?,
+                        source = COALESCE(?, source), job_url = COALESCE(?, job_url),
                         location = COALESCE(?, location), salary_info = COALESCE(?, salary_info),
                         notes = COALESCE(?, notes), updated_at = ?
                     WHERE id = ?
                     """,
-                    (new_status, source, job_url, location, salary_info, notes, now, app_id),
+                    (canon_company, new_role, new_status, earliest_date, source, job_url, location, salary_info, notes, now, app_id),
                 )
                 conn.commit()
                 return app_id
@@ -234,19 +133,201 @@ class JobAgentStorage:
                     INSERT INTO applications (company, role, applied_date, status, source, job_url, location, salary_info, notes, created_at, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (company.strip(), role.strip(), app_date, status, source, job_url, location, salary_info, notes, now, now),
+                    (canon_company, canon_role, app_date, status, source, job_url, location, salary_info, notes, now, now),
                 )
                 conn.commit()
                 return cursor.lastrowid
 
-    def get_application_by_company(self, company: str) -> Optional[Dict[str, Any]]:
-        """Finds application by company name (case-insensitive substring match)."""
-        comp = company.strip().lower()
+    def deduplicate_applications(self) -> Dict[str, int]:
+        """Cleans existing applications in the database by merging duplicate companies,
+        upgrading placeholder roles, removing noise entities, and re-linking foreign keys.
+        """
+        from collections import defaultdict
+
+        merged_count = 0
+        deleted_noise_count = 0
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            apps = cursor.execute("SELECT * FROM applications").fetchall()
+
+            # 1. Remove noise companies (e.g. 'h LinkedIn', 'notifications@app.bamboohr.com')
+            for app in apps:
+                if is_noise_company(app["company"]):
+                    app_id = app["id"]
+                    cursor.execute("UPDATE email_interactions SET application_id = NULL WHERE application_id = ?", (app_id,))
+                    cursor.execute("UPDATE interviews SET application_id = NULL WHERE application_id = ?", (app_id,))
+                    cursor.execute("DELETE FROM applications WHERE id = ?", (app_id,))
+                    deleted_noise_count += 1
+
+            # 2. Re-query surviving applications
+            apps = cursor.execute("SELECT * FROM applications").fetchall()
+            by_canon = defaultdict(list)
+            for app in apps:
+                canon = normalize_company_name(app["company"]) or app["company"].strip()
+                by_canon[canon.lower()].append((canon, app))
+
+            # 3. Merge duplicate clusters
+            for canon_lower, group in by_canon.items():
+                if len(group) == 1:
+                    canon_name, app = group[0]
+                    clean_role = normalize_role_title(app["role"]) or app["role"]
+                    if app["company"] != canon_name or app["role"] != clean_role:
+                        cursor.execute(
+                            "UPDATE applications SET company = ?, role = ? WHERE id = ?",
+                            (canon_name, clean_role, app["id"]),
+                        )
+                    continue
+
+                records = [g[1] for g in group]
+                canon_name = group[0][0]
+
+                def rank_record(r):
+                    has_real_role = 1 if normalize_role_title(r["role"]) else 0
+                    status_rank = 3 if r["status"] == "Interview" else (2 if r["status"] == "Rejected" else 1)
+                    return (has_real_role, status_rank, -r["id"])
+
+                records.sort(key=rank_record, reverse=True)
+                primary = records[0]
+                primary_id = primary["id"]
+
+                best_role = normalize_role_title(primary["role"])
+                if not best_role:
+                    for r in records:
+                        cand = normalize_role_title(r["role"])
+                        if cand:
+                            best_role = cand
+                            break
+                if not best_role:
+                    best_role = primary["role"]
+
+                best_status = primary["status"]
+                if any(r["status"] == "Interview" for r in records):
+                    best_status = "Interview"
+                elif any(r["status"] == "Rejected" for r in records) and best_status != "Interview":
+                    best_status = "Rejected"
+
+                earliest_date = min([r["applied_date"] for r in records if r["applied_date"]] or [primary["applied_date"]])
+
+                cursor.execute(
+                    """
+                    UPDATE applications 
+                    SET company = ?, role = ?, status = ?, applied_date = ?
+                    WHERE id = ?
+                    """,
+                    (canon_name, best_role, best_status, earliest_date, primary_id),
+                )
+
+                for secondary in records[1:]:
+                    sec_id = secondary["id"]
+                    cursor.execute("UPDATE email_interactions SET application_id = ? WHERE application_id = ?", (primary_id, sec_id))
+                    cursor.execute("UPDATE interviews SET application_id = ? WHERE application_id = ?", (primary_id, sec_id))
+                    cursor.execute("DELETE FROM applications WHERE id = ?", (sec_id,))
+                    merged_count += 1
+
+            conn.commit()
+
+        return {"merged": merged_count, "noise_deleted": deleted_noise_count}
+
+    def save_raw_email(
+        self,
+        entry_id: str,
+        folder: str,
+        sender_name: str,
+        sender_email: str,
+        subject: str,
+        body: str,
+        preview: str,
+        received_time: str,
+    ) -> bool:
+        """Idempotently saves raw email into raw_emails table with ISO week tracking."""
+        if not entry_id:
+            return False
+
+        iso_week = ""
+        try:
+            parsed_d = parse_flexible_date(received_time)
+            if parsed_d:
+                dt = datetime.strptime(parsed_d, "%Y-%m-%d")
+                iso_week = f"{dt.year}-W{dt.isocalendar()[1]:02d}"
+        except Exception:
+            pass
+        if not iso_week:
+            iso_week = "Unknown"
+
+        now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT * FROM applications WHERE LOWER(company) = ? OR LOWER(company) LIKE ? ORDER BY applied_date DESC LIMIT 1",
-                (comp, f"%{comp}%"),
+                """
+                INSERT OR IGNORE INTO raw_emails (entry_id, folder, sender_name, sender_email, subject, body, preview, received_time, iso_week, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (entry_id, folder, sender_name, sender_email, subject, body, preview, received_time, iso_week, now),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def list_raw_emails(
+        self,
+        folder: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        iso_week: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Queries stored raw emails with optional date, folder, or ISO week filters."""
+        query = "SELECT * FROM raw_emails WHERE 1=1"
+        params: List[Any] = []
+        if folder:
+            query += " AND LOWER(folder) = LOWER(?)"
+            params.append(folder)
+        if iso_week:
+            query += " AND iso_week = ?"
+            params.append(iso_week)
+        if start_date:
+            s_iso = parse_flexible_date(start_date)
+            if s_iso:
+                query += " AND substr(received_time, 1, 10) >= ?"
+                params.append(s_iso)
+        if end_date:
+            e_iso = parse_flexible_date(end_date)
+            if e_iso:
+                query += " AND substr(received_time, 1, 10) <= ?"
+                params.append(e_iso)
+        query += " ORDER BY received_time DESC"
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_application_emails(self, application_id: int) -> List[Dict[str, Any]]:
+        """Retrieves all email interactions linked to an application for traceability and auditing."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM email_interactions WHERE application_id = ? ORDER BY received_time ASC",
+                (application_id,),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+
+    def get_application_by_company(self, company: str) -> Optional[Dict[str, Any]]:
+        """Finds application by company name (case-insensitive substring match with normalization)."""
+        canon = normalize_company_name(company) or company.strip()
+        comp = canon.lower()
+        raw_comp = company.strip().lower()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM applications 
+                WHERE LOWER(company) = ? 
+                   OR LOWER(company) LIKE ? 
+                   OR LOWER(?) LIKE LOWER(company) || '%'
+                   OR ? LIKE '%' || LOWER(company) || '%'
+                ORDER BY applied_date DESC LIMIT 1
+                """,
+                (comp, f"%{comp}%", raw_comp, raw_comp),
             )
             row = cursor.fetchone()
             return dict(row) if row else None
@@ -321,6 +402,7 @@ class JobAgentStorage:
                 (application_id, entry_id, sender_name, sender_email, subject, received_time, category, preview, confidence_score, action_taken)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(entry_id) DO UPDATE SET 
+                    application_id = COALESCE(excluded.application_id, email_interactions.application_id),
                     category = excluded.category,
                     action_taken = excluded.action_taken,
                     confidence_score = excluded.confidence_score
@@ -499,6 +581,18 @@ class JobAgentStorage:
             else:
                 report_period = "Gesamtzeitraum"
 
+        # Batch-fetch email interactions for traceability
+        app_emails_map: Dict[int, List[Dict[str, Any]]] = {}
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT application_id, entry_id, category, subject, received_time, sender_name "
+                "FROM email_interactions WHERE application_id IS NOT NULL ORDER BY received_time ASC"
+            )
+            for r in cursor.fetchall():
+                aid = r["application_id"]
+                app_emails_map.setdefault(aid, []).append(dict(r))
+
         # Format applications for German AfA statutory format and dashboards
         formatted_apps = []
         for idx, app in enumerate(apps, 1):
@@ -510,8 +604,13 @@ class JobAgentStorage:
                 log.debug("Date parse fallback for %s: %s", applied_dt_str, e)
                 display_date = applied_dt_str[:10]
 
+            app_id = app.get("id")
+            linked = app_emails_map.get(app_id, [])
+            entry_ids = [m["entry_id"] for m in linked if m.get("entry_id")]
+
             formatted_apps.append({
                 "index": idx,
+                "id": app_id,
                 "company": app.get("company", "—"),
                 "role": app.get("role", "—"),
                 "applied_date": display_date,
@@ -520,6 +619,10 @@ class JobAgentStorage:
                 "location": app.get("location") or "—",
                 "notes": app.get("notes") or "",
                 "job_url": app.get("job_url") or "",
+                "email_count": len(linked),
+                "emails": linked,
+                "entry_ids": entry_ids,
+                "primary_entry_id": entry_ids[0] if entry_ids else "",
             })
 
         return {
@@ -673,9 +776,17 @@ class JobAgentStorage:
         # Technical skills years
         tech = getattr(profile, "technical_skills", None)
         years = getattr(tech, "yearsExperience", {}) if tech else {}
+        SKILL_TEMPLATES = [
+            ("How many years of experience do you have with {skill}?", "{yr} years"),
+            ("Wie viele Jahre Erfahrung haben Sie mit {skill}?", "{yr} Jahre"),
+        ]
         for skill, yr in years.items():
-            self.save_qa_answer(f"How many years of experience do you have with {skill}?", f"{yr} years", category="skill_experience")
-            self.save_qa_answer(f"Wie viele Jahre Erfahrung haben Sie mit {skill}?", f"{yr} Jahre", category="skill_experience")
+            for q_tmpl, a_tmpl in SKILL_TEMPLATES:
+                self.save_qa_answer(
+                    q_tmpl.format(skill=skill),
+                    a_tmpl.format(yr=yr),
+                    category="skill_experience",
+                )
 
     def import_from_summary(
         self,
@@ -712,16 +823,10 @@ class JobAgentStorage:
                 if not role or role in ["—", "-", "this", ""]:
                     emails = app.get("emails", [])
                     subj = emails[0].get("subject", "") if emails else ""
-                    lower_subj = subj.lower()
-                    m = None
-                    if not any(marker in lower_subj for marker in _NON_ROLE_SUBJECT_MARKERS):
-                        # Only accept an explicit role phrase ("als X", "für die
-                        # Position X", "Position: X", "für die Stelle[:] X").
-                        # Bare "Position" without a colon (e.g. "Keine Position
-                        # erkennbar") must NOT match.
-                        m = re.search(r'(?:als|für die Position|Position:|für die Stelle:?)\s*["“\']?([^"”\'\n\r/]+)', subj, re.I)
-                    if m:
-                        role = m.group(1).strip()
+                    snippet = emails[0].get("snippet", "") if emails else ""
+                    extracted = extract_role_from_context(subj, snippet)
+                    if extracted:
+                        role = extracted
 
                 if not role:
                     if existing_id is not None and existing_role not in (None, "", UNKNOWN_ROLE):

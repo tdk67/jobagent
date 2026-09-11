@@ -14,7 +14,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from urllib.parse import urlsplit
 
@@ -105,8 +105,8 @@ def _is_allowed_host_header(raw_host: Optional[str], configured_host: str) -> bo
 
 
 def _is_gateway_path(path: str) -> bool:
-    """True for gateway-protected routes: /api/* and /a2a/* (Host-validated)."""
-    return path.startswith("/api/") or path.startswith("/a2a/")
+    """True for gateway-protected routes: /api/*, /a2a/*, /dashboard (Host-validated)."""
+    return path.startswith("/api/") or path.startswith("/a2a/") or path == "/dashboard"
 
 
 
@@ -142,15 +142,14 @@ def create_a2a_app(
     def verify_token(
         credentials: Optional[HTTPAuthorizationCredentials] = Security(security_bearer),
         x_token: Optional[str] = Header(None, alias="X-JobAgent-Token"),
-        token: Optional[str] = Query(None, alias="token"),
     ) -> bool:
+        # P1 fix: tokens must never be passed in URL query strings (no ?token=... in browser/proxy logs).
+        # Authentication is strictly via Authorization: Bearer <token> or X-JobAgent-Token: <token>.
         supplied = None
         if credentials and credentials.credentials:
             supplied = credentials.credentials
         elif x_token:
             supplied = x_token
-        elif token:
-            supplied = token
 
         if not supplied or not secrets.compare_digest(supplied, active_token):
             raise HTTPException(
@@ -380,6 +379,15 @@ def create_a2a_app(
             "interviews": db.list_interviews(),
             "recent_applications": db.list_applications(limit=5),
         }
+
+    # 3b. Interactive / Visual Web Dashboard (P1 fix: clean URL, zero credentials in URL)
+    @app.get("/dashboard", response_class=HTMLResponse)
+    async def get_dashboard() -> HTMLResponse:
+        """Renders live HTML dashboard with current database metrics."""
+        res = report_engine.generate(view_type="dashboard", export_pdf=False)
+        html_file = Path(res["html_path"])
+        html_content = html_file.read_text(encoding="utf-8")
+        return HTMLResponse(content=html_content)
 
     # 4. SSE Real-Time Event Stream for Parent Personal Agents
     @app.get("/a2a/v1/events", dependencies=[Depends(verify_token)])

@@ -398,11 +398,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // 4. Open Dashboard
+  // 4. Open Dashboard (P1 fix: clean URL without query token; auth via loopback/headers)
   btnDashboard.addEventListener("click", () => {
-    const url = apiToken
-      ? `${gatewayUrl}/a2a/v1/status?token=${encodeURIComponent(apiToken)}`
-      : `${gatewayUrl}/a2a/v1/status`;
-    chrome.tabs.create({ url });
+    chrome.tabs.create({ url: `${gatewayUrl}/dashboard` });
   });
 });

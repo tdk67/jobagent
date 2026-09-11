@@ -90,7 +90,7 @@ class ReportRenderEngine:
     ) -> List[Dict[str, Any]]:
         """Generates separate weekly reports week-by-week between start_date and end_date."""
         from datetime import date, datetime, timedelta, timezone
-        from src.core.storage import parse_flexible_date
+        from src.utils.date_utils import parse_flexible_date
 
         s_str = parse_flexible_date(start_date) or "2026-07-01"
         e_str = parse_flexible_date(end_date) or datetime.now(timezone.utc).strftime("%Y-%m-%d")

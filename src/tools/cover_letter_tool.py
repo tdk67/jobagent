@@ -9,6 +9,7 @@ Adheres to clean-code-architecture:
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import os
@@ -173,23 +174,23 @@ class CoverLetterEngine:
             if p.strip() == cand_name.strip():
                 continue
             filtered_paragraphs.append(p)
-        body_html = "\n".join(f"    <p>{p.replace(chr(10), '<br>')}</p>" for p in filtered_paragraphs)
+        body_html = "\n".join(f"    <p>{html.escape(p).replace(chr(10), '<br>')}</p>" for p in filtered_paragraphs)
 
         # 4. Render HTML template
         html_template = self._load_template_file("cover_letter_template.html")
         closing = "Mit freundlichen Grüßen," if lang.lower().startswith("de") else "Sincerely,"
-        subject = f"Bewerbung als {role_display}" if lang.lower().startswith("de") else f"Application for {role_display}"
+        raw_subject = f"Bewerbung als {role_display}" if lang.lower().startswith("de") else f"Application for {role_display}"
 
         rendered_html = (
             html_template
             .replace("{{ LANG }}", "de" if lang.lower().startswith("de") else "en")
-            .replace("{{ SENDER_NAME }}", cand_name)
-            .replace("{{ SENDER_CONTACT }}", contact_line)
-            .replace("{{ RECIPIENT }}", recipient_display.replace("\n", "<br>"))
-            .replace("{{ DATE }}", formatted_date)
-            .replace("{{ SUBJECT }}", subject)
+            .replace("{{ SENDER_NAME }}", html.escape(cand_name))
+            .replace("{{ SENDER_CONTACT }}", html.escape(contact_line))
+            .replace("{{ RECIPIENT }}", html.escape(recipient_display).replace("\n", "<br>"))
+            .replace("{{ DATE }}", html.escape(formatted_date))
+            .replace("{{ SUBJECT }}", html.escape(raw_subject))
             .replace("{{ BODY }}", body_html)
-            .replace("{{ CLOSING }}", closing)
+            .replace("{{ CLOSING }}", html.escape(closing))
         )
 
         html_path.write_text(rendered_html, encoding="utf-8")

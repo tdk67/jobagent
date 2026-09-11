@@ -248,7 +248,18 @@
           {% for app in applications %}
           <tr>
             <td>{{ app.index }}</td>
-            <td><strong>{{ app.company }}</strong></td>
+            <td>
+              <strong>{{ app.company }}</strong>
+              {% if app.email_count and app.email_count > 1 %}
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;" title="Linked emails: {{ app.email_count }} | IDs: {{ app.entry_ids | join(', ') }}">
+                  🔗 {{ app.email_count }} emails linked
+                </div>
+              {% elif app.primary_entry_id %}
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;" title="Email ID: {{ app.primary_entry_id }}">
+                  📧 1 email
+                </div>
+              {% endif %}
+            </td>
             <td>{{ app.role }}</td>
             <td>{{ app.applied_date }}</td>
             <td>{{ app.source }}</td>
