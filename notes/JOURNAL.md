@@ -79,3 +79,29 @@ Evidence: `notes/evidence/F5-qa.md`. Tests: 3 new tests in `tests/test_storage.p
 Lesson: In compliance-sensitive paths (statutory AfA reports, legally significant form
 questions), fabricated defaults are worse than empty fields. Use explicit "unknown" placeholders
 and visible markers to force human review.
+
+## 2026-09-12 — F6 done (dead config wiring, duplicate @tool removal, 400 contract fix, README claims)
+Commit `174a874`. Four problems fixed: (1) Six environment variables declared in .env.example
+but never read by config.py — wired IMAP_HOST, IMAP_PORT (int-validated), IMAP_USE_SSL
+(bool "1/true/yes"), A2A_HOST, A2A_PORT (int-validated), JOBAGENT_DB into load_config()
+with precedence env > config.local.json > config.example.json > defaults; invalid ints logged
+as warnings and ignored (not silent failure). (2) Three duplicate module-level @tool functions
+(ingest_emails in email_ingest_tool.py, archive_job_posting in job_archive_tool.py,
+generate_compliance_report in report_render_tool.py) duplicated the coordinator's session-bound
+closures and were used by nobody — deleted all three (engine classes retained), removed unused
+imports (json, from strands import tool). (3) POST /a2a/v1/tasks with unknown action returned
+HTTP 200 status:"failed" because HTTPException(400) was swallowed by generic except Exception —
+added `except HTTPException: raise` before the generic handler. (4) .env.example removed unused
+OPENAI_API_KEY and GMAIL_APP_PASSWORD (don't advertise config that doesn't exist), kept
+IMAP_USER/IMAP_PASSWORD (used by adapters); README.md replaced hardcoded "26 unit and integration
+tests" with version-neutral language, added LLM provider-inference disclosure in Privacy section
+("LLM Inference Leaves the Machine: Storage is 100% local, but LLM inference necessarily sends
+profile context to the configured provider"), added Environment Overrides documentation table.
+Evidence: `notes/evidence/F6-qa.md`. Tests: 4 new tests across `tests/test_config.py`
+(3 env-override tests: test_env_overrides_imap_and_a2a_and_db, test_env_override_bool_true_variants,
+test_env_unset_file_and_default_values_win) and `tests/test_a2a.py` (1 unknown-action test:
+test_delegate_task_unknown_action_returns_400). Full suite: 49 passed (45 baseline + 4 new).
+Lesson: Declaring environment variables in documentation but never reading them creates a false
+sense of configurability — users set env vars expecting them to work, but the application silently
+ignores them. Wire env vars explicitly with validation (log warnings on invalid values, don't
+crash silently), and document the precedence order so users know which source wins.
