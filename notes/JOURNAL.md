@@ -41,3 +41,22 @@ Evidence: `notes/evidence/F3-qa.md`. Tests: 5 new tests in `tests/test_a2a.py`:
 Lesson: DNS rebinding is a real threat even for loopback-bound services — a browser can be tricked
 into resolving an attacker's domain to 127.0.0.1, and the Host header will reveal the attacker's
 domain. Validating the Host header is a simple, effective defense that works regardless of client IP.
+
+## 2026-09-12 — F4 done (correctness fixes)
+Commit `7ee5e90`. Fixed five independent correctness bugs: (1) city extraction now returns
+`pers.city` with fallback to the postal-code-bearing address segment instead of the street
+(segment 0); (2) IMAP date range now wired via `build_imap_search_criteria(start_date, end_date,
+cutoff_date)` helper producing `SINCE dd-Mon-yyyy BEFORE dd-Mon-yyyy` criteria; (3) LLM triage
+fallback flag `llm_fallback: bool = False` added to `EmailIngestionConfig` and wired through
+`run_triage` to `classifier.classify(enable_llm_fallback=...)`; (4) Gmail dead-adapter guard:
+when `gmail.enabled` but no MCP client is wired, logs a loud warning and does NOT append a
+dead `GmailMcpAdapter(mcp_client=None)`; (5) Strands model fail-loud: `self.llm_available`
+computed in `_init_strands_agent` (True only when Gemini or Bedrock successfully initialize
+with credentials), gates the agent-reasoning branch in `run_autonomous_cycle`.
+Evidence: `notes/evidence/F4-qa.md`. Tests: 10 new tests across `tests/test_form_reasoner.py`
+(2 city tests), `tests/test_email_ingest.py` (4 IMAP criteria tests, 2 llm_fallback tests,
+1 Gmail dead-adapter test), `tests/test_autonomous_agent.py` (1 new no-creds test + 2 updated
+fallback tests). Full suite: 42 passed (32 baseline + 10 new).
+Lesson: Silent failures (dead adapters, ignored config flags, doomed LLM calls) are harder to
+debug than loud warnings. Gate expensive operations on explicit availability checks, and log
+warnings when expected resources are missing.
