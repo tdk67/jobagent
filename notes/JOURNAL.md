@@ -105,3 +105,19 @@ Lesson: Declaring environment variables in documentation but never reading them 
 sense of configurability — users set env vars expecting them to work, but the application silently
 ignores them. Wire env vars explicitly with validation (log warnings on invalid values, don't
 crash silently), and document the precedence order so users know which source wins.
+
+## 2026-09-12 — F7 done (final regression & judge-readiness sweep)
+Commit `080c05f`. No code changes — evidence-only task. Independently re-verified the entire
+remediation end-to-end: full test suite passed twice in a row (49 tests, no flakiness); PII
+scan across all git history clean (scanner self-verified by injecting a dummy token into a
+scratch repo — it correctly detects it, proving the scan is not a no-op); secret scan across
+all history clean (no sk-*, AKIA*, ghp_* patterns); end-to-end demo on a /tmp copy exited 0
+with all four expected outcomes (1 interview detected, 1 rejection processed, 1 spam discarded,
+3 PDF reports generated); server smoke test on port 8799 confirmed health endpoint (200),
+DNS-rebinding guard (evil Host → 403), pair endpoint (200 + token), unauthenticated rejection
+(401), and authenticated capabilities (200). All exception handlers in changed files are loud
+(log.warning or raise) — no silent failures. Repository is judge-ready for the Sept 14 deadline.
+Evidence: `notes/evidence/F7-qa.md`. Full suite: 49 passed (unchanged from F6 baseline).
+Lesson: A final adversarial sweep before submission catches integration-level issues that
+individual task reviews miss — running the full suite twice catches flakiness, and the PII
+scanner self-verification step proves the scan is meaningful rather than a silent no-op.
