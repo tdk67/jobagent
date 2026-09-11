@@ -315,8 +315,14 @@ def main():
     elif args.server:
         import uvicorn
         from src.a2a.server import create_a2a_app
-        host = args.host or cfg.a2a.host
-        port = args.port or cfg.a2a.port
+        # Override order: CLI flag > env (A2A_HOST/A2A_PORT) > config value.
+        host = args.host or os.getenv("A2A_HOST") or cfg.a2a.host
+        port_env = os.getenv("A2A_PORT")
+        port = args.port or (int(port_env) if port_env else cfg.a2a.port)
+        # Keep the gateway's Host-header guard in sync with the effective bind:
+        # the configured host must be one of the Hosts the middleware accepts.
+        cfg.a2a.host = host
+        cfg.a2a.port = port
         app = create_a2a_app(config=cfg)
         print(f"Starting JobAgent A2A Gateway on http://{host}:{port}...")
         uvicorn.run(app, host=host, port=port)

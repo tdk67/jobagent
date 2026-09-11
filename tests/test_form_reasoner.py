@@ -125,7 +125,9 @@ def test_server_form_endpoints(tmp_path: Path, mock_profile: CandidateProfile):
     cfg.storage.database_path = str(db_file)
 
     app = create_a2a_app(config=cfg, storage=storage, profile=mock_profile, api_token="test-token-123")
-    client = TestClient(app)
+    # Loopback base_url: F3 gateway validates the Host header on /api/* routes
+    # (TestClient's default 'testserver' is correctly rejected).
+    client = TestClient(app, base_url="http://127.0.0.1:8765")
     headers = {"Authorization": "Bearer test-token-123"}
 
     # 1. Test POST /api/v1/form/learn

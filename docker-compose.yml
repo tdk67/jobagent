@@ -8,11 +8,18 @@ services:
     container_name: jobagent
     restart: unless-stopped
     ports:
-      - "8765:8765"
+      # Loopback-only publish: the gateway serves a local-first PII API (profile,
+      # CV documents). To expose deliberately on the LAN, override the port
+      # mapping (e.g. "8765:8765") — the Host-header guard inside the gateway
+      # will still reject non-loopback Host names.
+      - "127.0.0.1:8765:8765"
     environment:
       - PYTHONUNBUFFERED=1
       - LOG_LEVEL=INFO
-      - A2A_HOST=0.0.0.0
+      # Default loopback bind; override intentionally (e.g. set A2A_HOST to the
+      # LAN interface) only when the Host-header guard on the gateway has been
+      # relaxed — the guard below rejects non-loopback Host names anyway.
+      - A2A_HOST=127.0.0.1
     env_file:
       - path: .env
         required: false

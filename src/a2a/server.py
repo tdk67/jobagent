@@ -16,6 +16,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Qu
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from urllib.parse import urlsplit
 
 ROBOTS_TXT = """User-agent: *
 Allow: /
@@ -67,6 +68,46 @@ from src.tools.report_render_tool import ReportRenderEngine
 
 log = logging.getLogger(__name__)
 security_bearer = HTTPBearer(auto_error=False)
+
+
+# Hosts permitted to reach /api/* and /a2a/* (plus the configured gateway host).
+# This defeats DNS-rebinding: even when a malicious page's JS connects to a
+# loopback-bound gateway from a browser, its Host header will be the attacker's
+# domain and the request is rejected before any handler runs.
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def _host_header_value(raw_host: Optional[str]) -> Optional[str]:
+    """Extract and normalize the hostname from a Host header value.
+
+    Handles "127.0.0.1[:port]", "localhost[:port]", and IPv6 literals like
+    "[::1]:8765". Returns None for malformed or absent input.
+    """
+    if not raw_host:
+        return None
+    try:
+        split = urlsplit(f"http://{raw_host.strip()}")
+    except ValueError:
+        return None
+    hostname = split.hostname
+    if not hostname:
+        return None
+    return hostname.strip("[]").lower()
+
+
+def _is_allowed_host_header(raw_host: Optional[str], configured_host: str) -> bool:
+    hostname = _host_header_value(raw_host)
+    if hostname is None:
+        return False
+    allowed = set(_LOOPBACK_HOSTS)
+    allowed.add(configured_host.strip().strip("[]").lower())
+    return hostname in allowed
+
+
+def _is_gateway_path(path: str) -> bool:
+    """True for gateway-protected routes: /api/* and /a2a/* (Host-validated)."""
+    return path.startswith("/api/") or path.startswith("/a2a/")
+
 
 
 def create_a2a_app(
@@ -129,6 +170,17 @@ def create_a2a_app(
         version="1.0.0",
     )
     app.state.api_token = active_token
+
+    # Host-header validation middleware (F3, review finding S2): DNS-rebinding
+    # protection for every gateway route regardless of client IP. Only loopback
+    # hosts or the explicitly configured gateway host may reach /api/* and /a2a/*.
+    @app.middleware("http")
+    async def validate_host_header(request: Request, call_next):
+        if _is_gateway_path(request.url.path):
+            raw_host = request.headers.get("host")
+            if not _is_allowed_host_header(raw_host, cfg.a2a.host):
+                return JSONResponse(status_code=403, content={"detail": "Invalid Host header"})
+        return await call_next(request)
 
     # Secure CORS configuration: Restrict origins derived from active config
     allowed_origins = [
@@ -355,6 +407,7 @@ def create_a2a_app(
         client_host = request.client.host if request.client else ""
         if client_host not in ("127.0.0.1", "localhost", "::1"):
             raise HTTPException(status_code=403, detail="Auto-pairing only allowed from local loopback")
+        log.info("Extension paired from %s", client_host)
         return {"token": active_token, "status": "paired"}
 
     @app.get("/api/v1/profile", dependencies=[Depends(verify_token)])

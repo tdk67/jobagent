@@ -69,5 +69,8 @@ RUN mkdir -p data/archives data/snapshots output
 
 EXPOSE 8765
 
-# Default to starting the A2A Gateway and Extension API
-CMD ["python", "run_agent.py", "--server", "--host", "0.0.0.0", "--port", "8765"]
+# Default to starting the A2A Gateway and Extension API on LOOPBACK ONLY.
+# The gateway serves a local-first PII API (candidate profile, CV documents); it
+# must stay loopback-bound. To expose deliberately on the LAN, set ENV A2A_HOST
+# to the interface to bind — or override the compose port mapping below.
+CMD ["python", "run_agent.py", "--server", "--host", "127.0.0.1", "--port", "8765"]
