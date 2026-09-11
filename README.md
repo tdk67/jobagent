@@ -109,6 +109,24 @@ cp config.example.json config.local.json
 3. **`config.local.json`** (Application settings, git-ignored):
    Configure which email providers to scan (`outlook_desktop`, `imap`, `gmail_mcp`), report styling, and LLM model designations (`gemini-2.5-flash`).
 
+#### Environment Overrides (env wins over config files)
+
+The following environment variables are read at startup and override the
+`config.local.json` / `config.example.json` values (precedence: **env >
+config.local.json > config.example.json > defaults**):
+
+| Variable | Overrides | Example |
+| :--- | :--- | :--- |
+| `IMAP_HOST` | `email_ingestion.generic_imap.host` | `imap.test` |
+| `IMAP_PORT` | `email_ingestion.generic_imap.port` (int) | `993` |
+| `IMAP_USE_SSL` | `email_ingestion.generic_imap.use_ssl` ("1"/"true"/"yes" → True, else False) | `true` |
+| `A2A_HOST` | `a2a.host` | `127.0.0.1` |
+| `A2A_PORT` | `a2a.port` (int) | `8765` |
+| `JOBAGENT_DB` | `storage.database_path` | `data/jobagent.db` |
+
+`IMAP_USER` / `IMAP_PASSWORD` are read directly by the IMAP adapter (see `.env`).
+Invalid integer values (e.g. `A2A_PORT=abc`) are logged as warnings and ignored.
+
 ---
 
 ## 💼 Real-World Daily Usage
@@ -343,7 +361,7 @@ python run_agent.py --server --port 8765
 
 ## 🧪 Automated Testing
 
-JobAgent includes an extensive test suite (26 unit and integration tests) verifying all core functionalities:
+JobAgent includes an extensive test suite covering all core functionalities:
 ```bash
 pytest tests/ -v
 ```
@@ -363,7 +381,7 @@ Test coverage includes:
 
 - **100% Local Storage**: All relational application data, interview records, full-page visual PDF snapshots, and candidate profiles are stored strictly on your local machine (`data/jobagent.db`, `data/snapshots/`, `data/archives/`).
 - **No Cloud Database**: No user data or credentials are ever sent to an external database.
-- **Targeted LLM Reasoning**: Only anonymized job descriptions and email text are passed to the LLM for classification.
+- **LLM Inference Leaves the Machine**: Storage is 100% local, but LLM inference (Gemini or Bedrock) necessarily sends the profile context needed for form reasoning and email classification to the configured provider. Only the data needed for the task is included; inference never stores your data on the provider side.
 - **Strict PII Protection**: Sensitive form fields (passwords, bank accounts, personal identity numbers) are strictly ignored by the form reasoner and never cached in memory.
 
 ---

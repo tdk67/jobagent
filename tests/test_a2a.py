@@ -223,6 +223,22 @@ def test_auth_pair_rejects_non_loopback_client(tmp_path: Path):
     assert "loopback" in res.json()["detail"]
 
 
+def test_delegate_task_unknown_action_returns_400(tmp_path: Path):
+    """F6 VP3: POST /a2a/v1/tasks with an unknown action -> HTTP 400, not a swallowed 200."""
+    app, _storage, _profile, test_token = _make_f3_app(tmp_path)
+    client = TestClient(app, base_url="http://127.0.0.1:8765")
+    auth_headers = {"Authorization": f"Bearer {test_token}"}
+
+    payload = {
+        "source_agent": "hermes",
+        "action": "bogus",
+        "payload": {},
+    }
+    res = client.post("/a2a/v1/tasks", json=payload, headers=auth_headers)
+    assert res.status_code == 400
+    assert "bogus" in res.json()["detail"]
+
+
 def test_mcp_server_tools_registered():
     import asyncio
     tools = asyncio.run(mcp.list_tools())

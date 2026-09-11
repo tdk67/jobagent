@@ -10,8 +10,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
-from strands import tool
-
 from src.core.config import AppConfig, load_config
 from src.core.storage import JobAgentStorage
 from src.tools.archive.extractor import JobContentExtractor
@@ -140,26 +138,3 @@ class JobArchiveEngine:
             "snapshot_pdf_path": pdf_full_path,
             "metadata": metadata,
         }
-
-
-@tool(name="archive_job_posting", description="Preserves a job posting as clean Markdown and visual PDF snapshot.")
-def archive_job_posting(
-    company: str,
-    role: str,
-    job_url: Optional[str] = None,
-    raw_html: Optional[str] = None,
-) -> str:
-    """Archives a job posting into clean Markdown text and full-page PDF snapshot for interview preparation and compliance.
-
-    Parameters:
-        company: Name of the hiring company.
-        role: Title of the position.
-        job_url: Web address of the job post.
-        raw_html: Optional DOM HTML content of the job post.
-
-    Returns:
-        JSON string with paths to the archived assets and CRM entry ID.
-    """
-    engine = JobArchiveEngine()
-    result = engine.archive(company=company, role=role, job_url=job_url, raw_html=raw_html)
-    return json.dumps(result, indent=2)

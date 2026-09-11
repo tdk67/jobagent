@@ -6,8 +6,6 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from strands import tool
-
 from src.core.config import AppConfig, load_config
 from src.core.profile import CandidateProfile, load_profile
 from src.core.storage import JobAgentStorage
@@ -139,30 +137,3 @@ class ReportRenderEngine:
                 end_date=end_date,
             )
         return reports
-
-
-@tool(name="generate_compliance_report", description="Generates visual HTML dashboards and compliance PDFs.")
-def generate_compliance_report(
-    report_type: str = "dashboard",
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    weekly: bool = False,
-) -> str:
-    """Generates official compliance reports or personal dashboards.
-
-    Parameters:
-        report_type: Type of report: "dashboard" (KPI overview), "afa_table" (German Agentur für Arbeit statutory table), or "agency_summary" (Headhunter list).
-        start_date: Optional start date (e.g. "2026-07-01" or "1-Jul").
-        end_date: Optional end date (e.g. "2026-09-11").
-        weekly: If True, generates separate week-by-week reports from start_date to end_date.
-
-    Returns:
-        JSON string containing the paths to generated HTML and PDF files.
-    """
-    engine = ReportRenderEngine()
-    if weekly and start_date:
-        results = engine.generate_weekly_reports(start_date=start_date, end_date=end_date, view_type=report_type)
-        return json.dumps(results, indent=2)
-
-    result = engine.generate(view_type=report_type, export_pdf=True, start_date=start_date, end_date=end_date)
-    return json.dumps(result, indent=2)

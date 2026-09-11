@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-
-from strands import tool
 
 from src.core.config import AppConfig, load_config
 from src.core.storage import JobAgentStorage
@@ -202,25 +199,3 @@ class EmailIngestEngine:
                     results["noise_filtered"] += 1
 
         return results
-
-
-@tool(name="ingest_emails", description="Ingests and classifies incoming job search emails from Outlook or IMAP.")
-def ingest_emails(
-    limit: Optional[int] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-) -> str:
-    """Ingests job search emails from connected inboxes, classifies them into interviews, rejections, or confirmations, and updates local private storage.
-
-    Parameters:
-        limit: Maximum number of emails to scan.
-        start_date: Optional start date for date range filtering (e.g. '2026-07-01' or '1-Jul').
-        end_date: Optional end date for date range filtering (e.g. '2026-07-07').
-
-    Returns:
-        A JSON summary of the triage results and any actionable alerts.
-    """
-    engine = EmailIngestEngine()
-    results = engine.run_triage(limit=limit, start_date=start_date, end_date=end_date)
-    return json.dumps(results, indent=2)
-

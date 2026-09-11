@@ -358,6 +358,12 @@ def create_a2a_app(
             else:
                 raise HTTPException(status_code=400, detail=f"Unknown A2A action: {action}")
 
+        except HTTPException:
+            # Contract fix (F6): validation errors (unknown action) must surface as
+            # their real HTTP status (400), not be swallowed by the generic handler
+            # and returned as HTTP 200 with status "failed".
+            raise
+
         except Exception as err:
             log.warning("Task execution failed for action %s: %s", action, err, exc_info=True)
             return TaskResponse(

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -97,6 +98,68 @@ class AppConfig(BaseModel):
     reporting: ReportingConfig = Field(default_factory=ReportingConfig)
 
 
+def _parse_bool_env(value: Optional[str]) -> Optional[bool]:
+    """Parse IMAP_USE_SSL-style env values: '1', 'true', 'yes' (any case) -> True, else False."""
+    if value is None or value.strip() == "":
+        return None
+    return value.strip().lower() in ("1", "true", "yes")
+
+
+@dataclass
+class _EnvOverrides:
+    """Optional env-driven overrides applied after config file merge (env > files > defaults)."""
+    imap_host: Optional[str] = None
+    imap_port: Optional[int] = None
+    imap_use_ssl: Optional[bool] = None
+    a2a_host: Optional[str] = None
+    a2a_port: Optional[int] = None
+    database_path: Optional[str] = None
+
+
+def _collect_env_overrides() -> _EnvOverrides:
+    """Read env vars that F6 wires into the config (precedence: env > config files > defaults).
+
+    Invalid int values are logged as warnings and ignored so a bad value cannot
+    crash startup silently or mask the file/default config.
+    """
+    o = _EnvOverrides()
+    o.imap_host = os.getenv("IMAP_HOST") or None
+    o.imap_use_ssl = _parse_bool_env(os.getenv("IMAP_USE_SSL"))
+    o.a2a_host = os.getenv("A2A_HOST") or None
+    o.database_path = os.getenv("JOBAGENT_DB") or None
+
+    raw_port = os.getenv("IMAP_PORT")
+    if raw_port:
+        try:
+            o.imap_port = int(raw_port)
+        except ValueError:
+            log.warning("Ignoring invalid IMAP_PORT env value %r (must be an int)", raw_port)
+    raw_a2a_port = os.getenv("A2A_PORT")
+    if raw_a2a_port:
+        try:
+            o.a2a_port = int(raw_a2a_port)
+        except ValueError:
+            log.warning("Ignoring invalid A2A_PORT env value %r (must be an int)", raw_a2a_port)
+    return o
+
+
+def _apply_env_overrides(cfg: AppConfig, o: _EnvOverrides) -> AppConfig:
+    """Apply env overrides onto the merged config (in place, returns cfg for chaining)."""
+    if o.imap_host is not None:
+        cfg.email_ingestion.generic_imap.host = o.imap_host
+    if o.imap_port is not None:
+        cfg.email_ingestion.generic_imap.port = o.imap_port
+    if o.imap_use_ssl is not None:
+        cfg.email_ingestion.generic_imap.use_ssl = o.imap_use_ssl
+    if o.a2a_host is not None:
+        cfg.a2a.host = o.a2a_host
+    if o.a2a_port is not None:
+        cfg.a2a.port = o.a2a_port
+    if o.database_path is not None:
+        cfg.storage.database_path = o.database_path
+    return cfg
+
+
 def _deep_merge(target: Dict[str, Any], source: Dict[str, Any]) -> Dict[str, Any]:
     """Recursively merges source dict into target dict."""
     for key, value in source.items():
@@ -131,8 +194,11 @@ def load_config(
         except Exception as e:
             log.warning("Failed to load local config from %s: %s", local_p, e, exc_info=True)
 
-    # Ensure required target directories exist
+    # Environment overrides (F6): env > config.local.json > config.example.json > defaults.
     cfg = AppConfig(**merged_data) if merged_data else AppConfig()
+    cfg = _apply_env_overrides(cfg, _collect_env_overrides())
+
+    # Ensure required target directories exist
     Path(cfg.storage.archive_dir).mkdir(parents=True, exist_ok=True)
     Path(cfg.storage.snapshot_dir).mkdir(parents=True, exist_ok=True)
     Path(cfg.reporting.output_dir).mkdir(parents=True, exist_ok=True)
