@@ -60,3 +60,22 @@ fallback tests). Full suite: 42 passed (32 baseline + 10 new).
 Lesson: Silent failures (dead adapters, ignored config flags, doomed LLM calls) are harder to
 debug than loud warnings. Gate expensive operations on explicit availability checks, and log
 warnings when expected resources are missing.
+
+## 2026-09-12 — F5 done (data integrity in statutory/compliance paths)
+Commit `8942d86`. Three problems fixed: (1) `import_from_summary` defaulted unparseable roles
+to fabricated "Senior Software Engineer" — now uses `UNKNOWN_ROLE = "Unbekannt (bitte prüfen)"`
+and never overwrites an existing real role with the placeholder; (2) `run_agent.py --report`
+had a hidden auto-import block with hardcoded `C:/Data/work/jobSearch/...` path — removed
+entirely, `--import-summary` now requires an explicit path (exit 2 if omitted); (3) extension
+`localFallbackFill` hardcoded `val = "Ja"` for work authorization and `val = "Nein"` for
+previously-employed — now leaves these legally significant questions empty and marks them with
+dashed amber border + "⚠️ Legally significant question — please answer manually" tooltip.
+Salary/notice period autofill from profile but get the same confirm-marking.
+Evidence: `notes/evidence/F5-qa.md`. Tests: 3 new tests in `tests/test_storage.py`:
+`test_import_from_summary_unparseable_role_uses_unknown_placeholder`,
+`test_import_from_summary_does_not_overwrite_real_role_with_placeholder`,
+`test_import_from_summary_interviews_use_unknown_role_placeholder`. Full suite: 45 passed
+(42 baseline + 3 new).
+Lesson: In compliance-sensitive paths (statutory AfA reports, legally significant form
+questions), fabricated defaults are worse than empty fields. Use explicit "unknown" placeholders
+and visible markers to force human review.
