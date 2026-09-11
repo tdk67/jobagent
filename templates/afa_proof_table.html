@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Nachweis über Eigenbemühungen zur Arbeitsplatzsuche</title>
+  <style>
+    @page {
+      size: A4 landscape;
+      margin: 12mm 15mm 15mm 15mm;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 11px;
+      color: #000;
+      background: #fff;
+      line-height: 1.3;
+      padding: 10px;
+    }
+
+    .header-box {
+      border-bottom: 2px solid #000;
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    .title {
+      font-size: 15px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .subtitle {
+      font-size: 11px;
+      margin-top: 2px;
+      color: #333;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 1.2fr 1.2fr 1fr;
+      gap: 12px;
+      border: 1px solid #000;
+      padding: 8px 12px;
+      margin-bottom: 14px;
+      background-color: #f9f9f9;
+    }
+
+    .meta-item {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .meta-label {
+      font-size: 9px;
+      font-weight: bold;
+      text-transform: uppercase;
+      color: #555;
+    }
+
+    .meta-val {
+      font-size: 11px;
+      font-weight: bold;
+      margin-top: 2px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 16px;
+    }
+
+    th, td {
+      border: 1px solid #000;
+      padding: 6px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background-color: #e5e5e5;
+      font-weight: bold;
+      font-size: 10px;
+      text-align: center;
+    }
+
+    td.center { text-align: center; }
+
+    .footer-signatures {
+      margin-top: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      page-break-inside: avoid;
+    }
+
+    .sig-line {
+      border-top: 1px solid #000;
+      width: 250px;
+      text-align: center;
+      padding-top: 4px;
+      font-size: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header-box">
+    <div>
+      <div class="title">Nachweis über Eigenbemühungen zur Arbeitsplatzsuche</div>
+      <div class="subtitle">Gemäß § 138 Abs. 1 Nr. 2 / § 159 SGB III zur Vorlage bei der Bundesagentur für Arbeit / Jobcenter</div>
+    </div>
+    <div style="font-size: 10px; text-align: right; color: #555;">
+      Stand: {{ generated_at }}
+    </div>
+  </div>
+
+  <div class="meta-grid">
+    <div class="meta-item">
+      <span class="meta-label">Name, Vorname der/des Arbeitsuchenden:</span>
+      <span class="meta-val">{{ candidate_name | default("Alex Smith") }}</span>
+    </div>
+    <div class="meta-item">
+      <span class="meta-label">Wohnort / Anschrift:</span>
+      <span class="meta-val">{{ candidate_address | default("Frankfurt am Main, Deutschland") }}</span>
+    </div>
+    <div class="meta-item">
+      <span class="meta-label">Berufsbezeichnung / Fachrichtung:</span>
+      <span class="meta-val">{{ candidate_role | default("Senior Software Engineer") }}</span>
+    </div>
+    <div class="meta-item">
+      <span class="meta-label">Nachweiszeitraum:</span>
+      <span class="meta-val">{{ report_period | default("Gesamtzeitraum") }}</span>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 4%;">Lfd. Nr.</th>
+        <th style="width: 10%;">Datum der Bewerbung</th>
+        <th style="width: 26%;">Arbeitgeber (Firma, Ansprechpartner, Ort)</th>
+        <th style="width: 28%;">Ausgeübte bzw. angestrebte Tätigkeit</th>
+        <th style="width: 14%;">Art der Bewerbung</th>
+        <th style="width: 18%;">Ergebnis / Zwischenstand</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for app in applications %}
+      <tr>
+        <td class="center">{{ app.index }}</td>
+        <td class="center">{{ app.applied_date }}</td>
+        <td><strong>{{ app.company }}</strong><br><span style="color:#555; font-size:10px;">{{ app.location }}</span></td>
+        <td>{{ app.role }}</td>
+        <td class="center">{{ app.source }}</td>
+        <td>
+          {% if app.status == "Interview" %}
+            <strong>Vorstellungsgespräch terminiert</strong>
+          {% elif app.status == "Rejected" %}
+            Absage erhalten
+          {% else %}
+            Bewerbung eingereicht (in Prüfung)
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="footer-signatures">
+    <div>
+      <p style="font-size: 10px; color: #444;">Ich versichere die Richtigkeit und Vollständigkeit der vorstehenden Angaben.</p>
+    </div>
+    <div class="sig-line">
+      Datum, Unterschrift der/des Bewerber(s/in)
+    </div>
+  </div>
+
+</body>
+</html>

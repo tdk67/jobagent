@@ -1,0 +1,12 @@
+Dear Hiring Team,
+
+I am applying for the position of {job_title} at {company}.
+
+With extensive experience in software engineering and system architecture, I focus on building resilient, scalable systems and robust automated quality pipelines. My background combines strong backend and platform engineering with modern software development practices.
+
+I am enthusiastic about bringing my technical expertise, problem-solving mindset, and dedication to code quality to the team at {company}.
+
+My CV and references are attached. I look forward to the opportunity to discuss how my experience aligns with your team's goals.
+
+Sincerely,
+{candidate_name}

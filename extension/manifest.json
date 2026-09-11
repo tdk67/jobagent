@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "JobAgent Copilot",
+  "version": "1.0.0",
+  "description": "Browser Copilot & 1-Click Archiver for JobAgent (AWS Strands SDK). Decoupled, zero hardcoded PII.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:*/*",
+    "http://localhost:*/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "JobAgent Copilot"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ]
+}

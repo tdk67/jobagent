@@ -1,0 +1,29 @@
+version: "3.8"
+
+services:
+  jobagent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jobagent
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+      - A2A_HOST=0.0.0.0
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      # Persistent local database, job archives, and PDF snapshots
+      - ./data:/app/data
+      # Compliance PDF reports and dashboards
+      - ./output:/app/output
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

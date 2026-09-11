@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>JobAgent Copilot</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <div class="logo">
+      <div class="pulse-dot"></div>
+      <span class="title">JobAgent Copilot</span>
+    </div>
+    <span id="gateway-status" class="status-badge disconnected">Connecting...</span>
+  </div>
+
+  <div class="candidate-card">
+    <div class="candidate-avatar" id="cand-initials">--</div>
+    <div class="candidate-info">
+      <div class="candidate-name" id="cand-name">Loading Profile...</div>
+      <div class="candidate-role" id="cand-role">A2A Gateway Connected</div>
+    </div>
+  </div>
+
+  <div id="token-card" class="token-card hidden">
+    <div class="token-title">🔑 Backend API Token Required</div>
+    <div class="token-row">
+      <input type="password" id="token-input" placeholder="Paste X-JobAgent-Token..." class="token-field" />
+      <button id="btn-save-token" class="btn btn-primary btn-save">Pair</button>
+    </div>
+  </div>
+
+  <div class="actions-section">
+    <button id="btn-archive" class="btn btn-primary">
+      <span class="btn-icon">📸</span>
+      <span>1-Click Archive Posting</span>
+    </button>
+    <div id="archive-result" class="result-box hidden"></div>
+
+    <button id="btn-autofill" class="btn btn-secondary">
+      <span class="btn-icon">⚡</span>
+      <span>Auto-Fill Current Form</span>
+    </button>
+
+    <button id="btn-dashboard" class="btn btn-outline">
+      <span class="btn-icon">📊</span>
+      <span>View Career Analytics</span>
+    </button>
+  </div>
+
+  <div class="footer">
+    <span>Strands Agents SDK &bull; Zero PII Leak</span>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

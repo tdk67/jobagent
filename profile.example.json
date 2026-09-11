@@ -1,0 +1,92 @@
+{
+  "personal": {
+    "fullName": "Jane Doe",
+    "firstName": "Jane",
+    "lastName": "Doe",
+    "salutation": "Frau",
+    "salutationEn": "Ms.",
+    "email": "jane.doe@example.com",
+    "phone": "+49 150 0000000",
+    "phoneCountryCode": "+49",
+    "street": "Musterstrasse 1",
+    "postalCode": "60311",
+    "city": "Frankfurt am Main",
+    "state": "Hessen",
+    "countryDe": "Deutschland",
+    "countryEn": "Germany",
+    "address": "Musterstrasse 1, 60311 Frankfurt am Main, Deutschland",
+    "gender": "Weiblich",
+    "citizenship": "EU Citizen (Full Work Authorization)",
+    "citizenshipDe": "Deutsch",
+    "citizenshipEn": "German",
+    "linkedinUrl": "https://www.linkedin.com/in/example",
+    "githubUrl": "https://github.com/example",
+    "summaryDe": "Erfahrene Senior Softwareentwicklerin mit Schwerpunkt auf verteilten Systemen, Python, Java, Cloud und moderner Testautomatisierung.",
+    "summaryEn": "Experienced Senior Software Engineer focusing on distributed systems, Python, Java, Cloud, and automated testing."
+  },
+  "jobSearch": {
+    "headline": "Senior Software Engineer / Technical Lead",
+    "salaryExpectation": "80000",
+    "salaryFormatted": "80.000",
+    "salaryCurrency": "EUR",
+    "noticePeriodDe": "Keine / Sofort verfügbar",
+    "noticePeriodEn": "Immediately available",
+    "workAuthorizationDe": "Ja, unbeschränkte Arbeitserlaubnis (EU/Deutschland)",
+    "workAuthorizationEn": "Yes, full EU work authorization",
+    "requiresSponsorship": "No",
+    "willingToRelocate": "No",
+    "openToHybrid": "Yes",
+    "openToOnsite": "Yes"
+  },
+  "technical_skills": {
+    "core": [
+      "Python",
+      "Java",
+      "Spring Boot",
+      "SQL",
+      "Docker",
+      "Kubernetes",
+      "AWS",
+      "Git"
+    ],
+    "yearsExperience": {
+      "python": 8,
+      "java": 10,
+      "spring boot": 6,
+      "sql": 10,
+      "docker": 5,
+      "kubernetes": 4,
+      "aws": 5,
+      "git": 10
+    }
+  },
+  "documents": {
+    "englishCv": "C:\\path\\to\\cv_en.pdf",
+    "germanCv": "C:\\path\\to\\cv_de.pdf",
+    "referenceLetter": "C:\\path\\to\\reference_letter.pdf",
+    "certificatesDir": "C:\\path\\to\\certificates",
+    "coverLetter": ""
+  },
+  "qaAnswers": {
+    "sponsorship": "No",
+    "require sponsorship": "No",
+    "visa": "No",
+    "visum": "Nein",
+    "authorized to work": "Yes",
+    "legal right to work": "Yes",
+    "arbeitserlaubnis": "Ja",
+    "years of experience with python": "8",
+    "years of experience with java": "10",
+    "years of experience with sql": "10",
+    "highest level of education": "Master's Degree / University",
+    "höchster bildungsabschluss": "Master / Diplom / Universität",
+    "comfortable commuting": "Yes",
+    "bereit vor ort zu arbeiten": "Ja",
+    "willing to relocate": "No",
+    "umzugsbereit": "Nein",
+    "driver license": "Yes, Class B",
+    "führerschein": "Ja, Klasse B",
+    "notice period": "Immediate / Sofort",
+    "kündigungsfrist": "Keine / Sofort verfügbar"
+  }
+}

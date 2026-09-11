@@ -1,0 +1,59 @@
+{
+  "agent": {
+    "name": "JobAgent",
+    "provider": "gemini",
+    "model": "gemini-3.8-flash",
+    "fallback_provider": "bedrock",
+    "fallback_model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    "temperature": 0.1
+  },
+
+  "a2a": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8765,
+    "mcp_enabled": true,
+    "callback_timeout_seconds": 30
+  },
+  "storage": {
+    "database_path": "data/jobagent.db",
+    "archive_dir": "data/archives",
+    "snapshot_dir": "data/snapshots",
+    "qa_memory_path": "data/qa_memory.json"
+  },
+  "email_ingestion": {
+    "gmail": {
+      "enabled": true,
+      "method": "mcp",
+      "auto_tag_labels": {
+        "parent": "JobSearch",
+        "applications": "JobSearch/Applications",
+        "interviews": "JobSearch/Interviews",
+        "rejections": "JobSearch/Rejections"
+      }
+    },
+    "outlook_desktop": {
+      "enabled": true,
+      "folder_names": [
+        "Bewerbung",
+        "Inbox"
+      ]
+    },
+    "generic_imap": {
+      "enabled": false,
+      "host": "127.0.0.1",
+      "port": 1143,
+      "use_ssl": true
+    }
+  },
+  "reporting": {
+    "output_dir": "output",
+    "enable_afa_format": true,
+    "enable_pdf_export": true,
+    "default_views": [
+      "dashboard",
+      "afa_table",
+      "agency_summary"
+    ]
+  }
+}

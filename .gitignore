@@ -1,0 +1,38 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments & Virtual Envs
+.venv/
+env/
+venv/
+ENV/
+
+# Secrets & Private Personal Identifiers (PII) - STRICT NEVER COMMIT
+*.local.json
+profile.local.json
+config.local.json
+answered_questions.json
+answered_*.json
+.jobagent_token
+.env
+.env.*
+!.env.example
+
+# Local Application Data & Outputs
+data/
+output/
+storage/
+*.log
+*.pdf
+
+# Working Reference POCs (Local developer migration snapshots)
+reference_poc/
+scratch/
+
+# IDE & OS Files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
