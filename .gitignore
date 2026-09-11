@@ -36,3 +36,6 @@ scratch/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local agent workflow logs (worker/QA sessions, prompt files, PII pattern list)
+logs/
