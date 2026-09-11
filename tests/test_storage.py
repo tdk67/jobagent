@@ -1,7 +1,9 @@
 """Tests for JobAgent SQLite storage repository."""
 
+import json
+
 from pathlib import Path
-from src.core.storage import JobAgentStorage
+from src.core.storage import UNKNOWN_ROLE, JobAgentStorage
 
 
 def test_storage_crud(tmp_path: Path):
@@ -83,3 +85,77 @@ def test_storage_crud(tmp_path: Path):
     remote_app = next(a for a in summary2["applications"] if a["company"] == "Remote Works")
     assert remote_app["location"] == "—"
     assert "Frankfurt" not in remote_app["location"]
+
+
+def _write_summary_file(tmp_path: Path, company: str, subject: str) -> str:
+    """Writes a minimal applications_summary.json with an unparseable job_title."""
+    summary = {
+        "applications": [
+            {
+                "company": company,
+                "job_title": "",
+                "emails": [{"subject": subject}],
+                "application_date": "2026-08-01T10:00:00Z",
+                "status": "Applied",
+                "email_count": 1,
+            }
+        ]
+    }
+    summary_path = tmp_path / "applications_summary.json"
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False), encoding="utf-8")
+    return str(summary_path)
+
+
+def test_import_from_summary_unparseable_role_uses_unknown_placeholder(tmp_path: Path):
+    """F5 VP1: subject with no parseable role must NOT fabricate a role."""
+    db_path = tmp_path / "import_unknown.db"
+    storage = JobAgentStorage(db_path=str(db_path))
+    summary_path = _write_summary_file(tmp_path, "Fiktive GmbH", "Rückmeldung zu Ihrer Bewerbung")
+
+    res = storage.import_from_summary(summary_path)
+    assert res["applications_imported"] == 1
+
+    app = storage.get_application_by_company("Fiktive GmbH")
+    assert app is not None
+    assert app["role"] == UNKNOWN_ROLE
+    assert app["role"] != "Senior Software Engineer"
+
+
+def test_import_from_summary_does_not_overwrite_real_role_with_placeholder(tmp_path: Path):
+    """F5 VP1: a second import pass must not clobber a real role with the placeholder."""
+    db_path = tmp_path / "import_keep.db"
+    storage = JobAgentStorage(db_path=str(db_path))
+    summary_path = _write_summary_file(tmp_path, "Musterfirma AG", "Keine Position erkennbar")
+
+    storage.import_from_summary(summary_path)
+    app = storage.get_application_by_company("Musterfirma AG")
+    assert app is not None and app["role"] == UNKNOWN_ROLE
+
+    # A later flow (e.g. user correction) stores the real role.
+    with storage._get_connection() as conn:
+        conn.execute("UPDATE applications SET role = ? WHERE id = ?", ("Backend Engineer", app["id"]))
+
+    # Second import pass must NOT overwrite the real role with the placeholder.
+    storage.import_from_summary(summary_path)
+    app_after = storage.get_application_by_company("Musterfirma AG")
+    assert app_after is not None
+    assert app_after["role"] == "Backend Engineer"
+
+
+def test_import_from_summary_interviews_use_unknown_role_placeholder(tmp_path: Path):
+    """F5: interview import branch must not fabricate "Senior Software Engineer"."""
+    db_path = tmp_path / "import_interviews.db"
+    storage = JobAgentStorage(db_path=str(db_path))
+    summary_path = _write_summary_file(tmp_path, "Interviewfirma GmbH", "Kontaktaufnahme")
+    int_path = tmp_path / "interviews_consolidated.json"
+    int_path.write_text(
+        json.dumps([{"company": "Interviewfirma GmbH", "interview_type": "Video", "latest_date": "2026-08-10"}], ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    res = storage.import_from_summary(summary_path, interviews_path=str(int_path))
+    assert res["interviews_imported"] == 1
+
+    interviews = storage.list_interviews()
+    assert interviews
+    assert interviews[0]["role"] == UNKNOWN_ROLE

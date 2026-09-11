@@ -18,6 +18,30 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 log = logging.getLogger(__name__)
 
+# Role used when no role can be parsed from the import data. Must NEVER be a
+# fabricated real-sounding title: this value ends up in the statutory AfA
+# Eigenbemühungsnachweis, where invented data would be a compliance problem.
+UNKNOWN_ROLE = "Unbekannt (bitte prüfen)"
+
+# Subjects that must not trigger the role-parsing regex fallback (deceptive
+# sales pitches contain phrases like "für die Position", which are unrelated
+# to the actual job role).
+_NON_ROLE_SUBJECT_MARKERS = [
+    "webinar",
+    "netzwerk",
+    "bewerbungstraining",
+    "bildungsgutschein",
+    "fortbildung",
+    "coaching",
+    "workshop",
+    "jobalert",
+    "vertrieb und finanzkonzepte",
+    "match",
+    "exklusiv",
+    "sichern sie sich",
+    "platz sichern",
+]
+
 
 def parse_flexible_date(date_input: Optional[Any]) -> Optional[str]:
     """Parses flexible human-entered date strings into ISO format YYYY-MM-DD.
@@ -676,15 +700,36 @@ class JobAgentStorage:
                 if not company or len(company) < 2:
                     continue
 
+                existing_id = None
+                existing_role = None
+                cursor.execute("SELECT id, role FROM applications WHERE LOWER(company) = LOWER(?)", (company,))
+                existing_row = cursor.fetchone()
+                if existing_row:
+                    existing_id = existing_row["id"]
+                    existing_role = (existing_row["role"] or "").strip()
+
                 role = (app.get("job_title") or "").strip()
                 if not role or role in ["—", "-", "this", ""]:
                     emails = app.get("emails", [])
                     subj = emails[0].get("subject", "") if emails else ""
-                    m = re.search(r'(?:als|für die Position|Position:?|für die Stelle:?)\s+["“\']?([^"”\'\n\r/]+)', subj, re.I)
+                    lower_subj = subj.lower()
+                    m = None
+                    if not any(marker in lower_subj for marker in _NON_ROLE_SUBJECT_MARKERS):
+                        # Only accept an explicit role phrase ("als X", "für die
+                        # Position X", "Position: X", "für die Stelle[:] X").
+                        # Bare "Position" without a colon (e.g. "Keine Position
+                        # erkennbar") must NOT match.
+                        m = re.search(r'(?:als|für die Position|Position:|für die Stelle:?)\s*["“\']?([^"”\'\n\r/]+)', subj, re.I)
                     if m:
                         role = m.group(1).strip()
+
+                if not role:
+                    if existing_id is not None and existing_role not in (None, "", UNKNOWN_ROLE):
+                        # The application already has a real role; never clobber it
+                        # with the unknown placeholder (data-integrity rule).
+                        role = existing_role
                     else:
-                        role = "Senior Software Engineer"
+                        role = UNKNOWN_ROLE
 
                 applied_date = app.get("application_date") or datetime.now(timezone.utc).isoformat()
                 raw_status = (app.get("status") or "").lower()
@@ -698,16 +743,14 @@ class JobAgentStorage:
                 email_count = app.get("email_count", len(app.get("emails", [])))
                 notes = f"Imported from summary ({email_count} emails linked)"
 
-                cursor.execute("SELECT id FROM applications WHERE LOWER(company) = LOWER(?)", (company,))
-                row = cursor.fetchone()
-                if row:
+                if existing_id is not None:
                     cursor.execute(
                         """
                         UPDATE applications
                         SET role = ?, applied_date = ?, status = ?, source = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
                         """,
-                        (role, applied_date, status, "Direct / ATS", notes, row[0]),
+                        (role, applied_date, status, "Direct / ATS", notes, existing_id),
                     )
                 else:
                     cursor.execute(
@@ -732,7 +775,11 @@ class JobAgentStorage:
                 comp = item.get("company")
                 if not comp:
                     continue
-                role = item.get("job_title") or "Senior Software Engineer"
+                role = (item.get("job_title") or "").strip()
+                if not role or role in ["—", "-", "this", ""]:
+                    # Never fabricate a role: leave the interview role unknown for
+                    # human review instead of inventing one for the AfA records.
+                    role = UNKNOWN_ROLE
                 itype = item.get("interview_type") or "Interview"
                 idate = item.get("latest_date") or item.get("first_date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
 

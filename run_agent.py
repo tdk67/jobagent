@@ -160,12 +160,13 @@ def main():
         "--import-summary",
         type=str,
         nargs="?",
-        const="C:/Data/work/jobSearch/data/applications_summary.json",
-        help="Import historical applications and interviews from applications_summary.json",
+        const=None,
+        default=argparse.SUPPRESS,
+        help="Import historical applications and interviews from applications_summary.json (a summary path is required)",
     )
     parser.add_argument("--cover-letter", action="store_true", help="Generate a DIN 5008 German/English cover letter")
     parser.add_argument("--company", type=str, default="Unternehmen", help="Target company name for cover letter")
-    parser.add_argument("--role", type=str, default="Senior Software Engineer", help="Target job title/role for cover letter")
+    parser.add_argument("--role", type=str, default=None, help="Target job title/role for cover letter")
     parser.add_argument("--lang", type=str, default="de", choices=["de", "en"], help="Language for cover letter (de or en)")
     args = parser.parse_args()
 
@@ -186,7 +187,9 @@ def main():
 
     if args.demo:
         run_demo()
-    elif args.import_summary:
+    elif hasattr(args, "import_summary"):
+        if args.import_summary is None:
+            parser.error("--import-summary requires a path")
         from src.core.storage import JobAgentStorage
         storage = JobAgentStorage(cfg.storage.database_path)
         print("=" * 70)
@@ -202,13 +205,9 @@ def main():
         from src.tools.report_render_tool import ReportRenderEngine
 
         storage = JobAgentStorage(cfg.storage.database_path)
-        # If DB only has <= 2 items (e.g. initial demo seeds) and real summary exists, auto-sync!
-        existing_apps = storage.list_applications()
-        default_sum = Path("C:/Data/work/jobSearch/data/applications_summary.json")
-        if len(existing_apps) <= 2 and default_sum.exists() and not args.db:
-            print(f">> Notice: Detected {len(existing_apps)} existing applications. Auto-importing real history from {default_sum}...")
-            storage.import_from_summary(str(default_sum))
-
+        # NOTE: import_from_summary is NOT invoked here. Historical data must be
+        # imported explicitly via --import-summary; auto-importing from a hidden
+        # hardcoded path was removed (F5 data-integrity fix).
         engine = ReportRenderEngine(config=cfg, storage=storage)
         view = args.report
 
@@ -301,11 +300,12 @@ def main():
         print(json.dumps(res, indent=2))
     elif args.cover_letter:
         from src.tools.cover_letter_tool import CoverLetterEngine
+        role_for_letter = args.role or "Software Engineer"
         engine = CoverLetterEngine()
         print("=" * 70)
         print(f">> JobAgent: Generating DIN 5008 Cover Letter ({args.lang.upper()})")
         print("=" * 70)
-        res = engine.generate(company=args.company, role=args.role, lang=args.lang)
+        res = engine.generate(company=args.company, role=role_for_letter, lang=args.lang)
         print(f"✓ Target Company: {res['company']}")
         print(f"✓ Target Role:    {res['role']}")
         print(f"✓ Language:       {res['language']}")

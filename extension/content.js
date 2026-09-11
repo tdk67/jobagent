@@ -346,8 +346,19 @@
   // ---------------------------------------------------------------------------
   // 4. Local Fast-Path Fallback (Works fully offline)
   // ---------------------------------------------------------------------------
+  function markForReview(el) {
+    // Visible marker: dashed amber border + tooltip telling the user to answer
+    // manually. Used for legally significant questions that must not be
+    // auto-answered with fabricated values.
+    try {
+      el.style.border = "2px dashed #f59e0b";
+      el.title = "⚠️ Legally significant question — please answer manually";
+    } catch (e) {}
+  }
+
   function localFallbackFill(schema, elementMap, profile, documents) {
     let filledCount = 0;
+    let reviewCount = 0;
     const pers = profile?.personal || {};
     const commonAnswers = profile?.common_answers || pers?.qaAnswers || {};
 
@@ -424,13 +435,19 @@
       else if (/aktuell.*wohnsitz|country.*residence|wohnsitz|land.*wohnsitz/i.test(desc)) {
         val = pers.countryDe || pers.countryEn || "Deutschland";
       }
-      // 8. Work Authorization (Arbeitserlaubnis in dem Land)
+      // 8. Work Authorization (Arbeitserlaubnis in dem Land) — legally
+      //    significant; never autofill. Leave empty and mark for human review.
       else if (/arbeitserlaubnis|work.*authorization|legal.*right.*to.*work/i.test(desc)) {
-        val = "Ja";
+        markForReview(el);
+        reviewCount++;
+        continue;
       }
       // 9. Previously Employed (Warst du bereits bei der ... Gruppe angestellt?)
+      //    legally significant; never autofill. Leave empty and mark for review.
       else if (/bereits.*angestellt|previously.*employed|bereits.*gearbeitet|früher.*angestellt/i.test(desc)) {
-        val = "Nein";
+        markForReview(el);
+        reviewCount++;
+        continue;
       }
       // 10. Email Address
       else if (/email|e-mail|mail.*adresse/i.test(desc) || f.type === "email") {
@@ -444,13 +461,21 @@
       } else if (/zip|plz|postleitzahl|postal/i.test(desc)) {
         val = pers.postalCode || ((pers.address || "").match(/\b\d{5}\b/)?.[0] || "");
       }
-      // 12. Salary Expectation
+      // 12. Salary Expectation — may autofill from the profile but requires
+      //     human confirmation before submitting (legally significant).
       else if (/salary|gehalt|gehaltsvorstellung|compensation|vergütung/i.test(desc)) {
         val = pers.salaryExpectation;
+        if (val) {
+          markForReview(el);
+        }
       }
-      // 13. Notice Period / Availability
+      // 13. Notice Period / Availability — may autofill from the profile but
+      //     requires human confirmation before submitting.
       else if (/notice|kündigungsfrist|verfügbar|availability|start.*date|eintritt/i.test(desc)) {
         val = pers.noticePeriod;
+        if (val) {
+          markForReview(el);
+        }
       }
       // 14. Links
       else if (/linkedin/i.test(desc)) {
@@ -474,6 +499,9 @@
         console.log(`[JobAgent Copilot] ✅ Auto-filled field '${f.label || f.name}':`, val);
         filledCount++;
       }
+    }
+    if (reviewCount > 0) {
+      console.log(`[JobAgent Copilot] ⚠️ ${reviewCount} legally significant question(s) left empty and marked for human review.`);
     }
     return filledCount;
   }
