@@ -345,23 +345,12 @@ document.addEventListener("DOMContentLoaded", async () => {
         profile: cachedProfile,
         documents: docBundle,
         gatewayUrl: isGatewayOnline ? gatewayUrl : "",
-        apiToken: apiToken,
       };
 
-      // Broadcast to all frames (including embedded iframes on ATS like SuccessFactors, Workday, etc.)
-      try {
-        if (chrome.scripting && chrome.scripting.executeScript) {
-          await chrome.scripting.executeScript({
-            target: { tabId: activeTab.id, allFrames: true },
-            func: (data) => {
-              window.postMessage({ type: "JOBAGENT_AUTOFILL_BROADCAST", data }, "*");
-            },
-            args: [payload],
-          });
-        }
-      } catch (err) {
-        console.log("[JobAgent Copilot] Frame scripting note:", err);
-      }
+      // Runtime messaging (chrome.tabs.sendMessage) reaches content scripts in ALL
+      // frames of the tab — no window-level broadcast needed (would expose the
+      // payload to any third-party iframe on the page).
+
 
       // Send standard runtime message to active tab
       chrome.tabs.sendMessage(activeTab.id, payload, (res) => {

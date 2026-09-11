@@ -491,7 +491,6 @@
     }
 
     const gatewayUrl = request.gatewayUrl;
-    const apiToken = request.apiToken;
     const profile = request.profile;
     const documents = request.documents;
 
@@ -617,10 +616,7 @@
     }
   });
 
-  // Cross-frame window broadcast listener (for embedded ATS iframes)
-  window.addEventListener("message", (event) => {
-    if (event.data && event.data.type === "JOBAGENT_AUTOFILL_BROADCAST") {
-      performAutofill(event.data.data, null);
-    }
-  });
+  // JobAgent Copilot content script — no window-level "message" listeners.
+  // All communication uses chrome.runtime.onMessage (extension-private, invisible
+  // to page scripts and third-party iframes).
 })();
