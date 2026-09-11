@@ -1,6 +1,7 @@
 """Tests for email ingestion, classification, and triage."""
 
 from pathlib import Path
+import pytest
 from src.core.storage import JobAgentStorage
 from src.tools.email.adapters import MockEmailAdapter
 from src.tools.email.classifier import EmailClassifier
@@ -238,3 +239,164 @@ def test_idempotent_interview_and_email_ingest(tmp_path: Path):
     assert storage.list_interviews()[0]["entry_id"] == "unique-msg-id-12345"
     # H5: Alert must NOT re-fire for already recorded interview
     assert len(res2["actionable_alerts"]) == 0
+
+
+def test_build_imap_search_criteria_start_end():
+    """F4 VP2: start+end -> SINCE <start> BEFORE <end> (IMAP dd-Mon-yyyy format)."""
+    from src.tools.email.adapters import build_imap_search_criteria
+
+    criteria = build_imap_search_criteria(start_date="2026-09-01", end_date="2026-09-08")
+    assert criteria == ["SINCE 01-Sep-2026", "BEFORE 08-Sep-2026"]
+
+
+def test_build_imap_search_criteria_none_none():
+    """F4 VP2: no dates -> ['ALL']."""
+    from src.tools.email.adapters import build_imap_search_criteria
+
+    assert build_imap_search_criteria() == ["ALL"]
+    assert build_imap_search_criteria(None, None, None) == ["ALL"]
+
+
+def test_build_imap_search_criteria_cutoff_only():
+    """F4 VP2: only cutoff -> SINCE <cutoff>."""
+    from src.tools.email.adapters import build_imap_search_criteria
+
+    criteria = build_imap_search_criteria(cutoff_date="2026-08-15")
+    assert criteria == ["SINCE 15-Aug-2026"]
+
+
+def test_build_imap_search_criteria_flexible_inputs():
+    """F4 VP2: human-friendly date strings and datetimes parse the same way."""
+    from datetime import datetime, timezone
+    from src.tools.email.adapters import build_imap_search_criteria
+
+    criteria = build_imap_search_criteria(
+        start_date="1-Sep-2026",
+        end_date=datetime(2026, 9, 8, tzinfo=timezone.utc),
+    )
+    assert criteria == ["SINCE 01-Sep-2026", "BEFORE 08-Sep-2026"]
+
+
+def test_run_triage_passes_llm_fallback_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """F4 VP3: run_triage with llm_fallback=True config passes enable_llm_fallback=True
+    to classify (monkeypatching EmailClassifier.classify to capture kwargs)."""
+    import src.tools.email_ingest_tool as email_ingest_tool
+    from src.core.config import AppConfig, EmailIngestionConfig
+
+    db_path = tmp_path / "llm_fallback.db"
+    storage = JobAgentStorage(db_path=str(db_path))
+
+    config = AppConfig()
+    config.email_ingestion = EmailIngestionConfig(llm_fallback=True)
+
+    capped: list = []
+
+    def spy_classify(self, **kwargs):
+        capped.append(kwargs)
+        from src.tools.email.classifier import ClassificationResult
+        return ClassificationResult(
+            category="noise",
+            confidence=0.85,
+            explanation="spy",
+        )
+
+    monkeypatch.setattr(email_ingest_tool.EmailClassifier, "classify", spy_classify)
+
+    mock_adapter = MockEmailAdapter(
+        [
+            {
+                "entry_id": "spy_msg_1",
+                "sender_name": "Some Sender",
+                "sender_email": "sender@example.com",
+                "subject": "Test subject",
+                "body": "Just a test body.",
+                "received_time": "2026-09-10T10:00:00Z",
+            }
+        ]
+    )
+
+    engine = EmailIngestEngine(storage=storage, config=config, adapters=[mock_adapter])
+    engine.run_triage(limit=10)
+
+    assert len(capped) == 1
+    assert capped[0]["enable_llm_fallback"] is True
+
+
+def test_run_triage_llm_fallback_false_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """F4 VP3: default config (llm_fallback=False) passes enable_llm_fallback=False."""
+    import src.tools.email_ingest_tool as email_ingest_tool
+    from src.core.config import AppConfig
+
+    db_path = tmp_path / "llm_fallback_false.db"
+    storage = JobAgentStorage(db_path=str(db_path))
+
+    config = AppConfig()
+
+    capped: list = []
+
+    def spy_classify(self, **kwargs):
+        capped.append(kwargs)
+        from src.tools.email.classifier import ClassificationResult
+        return ClassificationResult(
+            category="noise",
+            confidence=0.85,
+            explanation="spy",
+        )
+
+    monkeypatch.setattr(email_ingest_tool.EmailClassifier, "classify", spy_classify)
+
+    mock_adapter = MockEmailAdapter(
+        [
+            {
+                "entry_id": "spy_msg_2",
+                "sender_name": "Some Sender",
+                "sender_email": "sender@example.com",
+                "subject": "Test subject 2",
+                "body": "Just another test body.",
+                "received_time": "2026-09-10T11:00:00Z",
+            }
+        ]
+    )
+
+    engine = EmailIngestEngine(storage=storage, config=config, adapters=[mock_adapter])
+    engine.run_triage(limit=10)
+
+    assert len(capped) == 1
+    assert capped[0]["enable_llm_fallback"] is False
+
+
+def test_gmail_dead_adapter_not_appended(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """F4 VP5: with gmail.enabled but NO MCP client wired, the engine logs a loud
+    warning ONCE and does NOT append a dead GmailMcpAdapter to self.adapters."""
+    import src.tools.email_ingest_tool as email_ingest_tool
+    from src.core.config import AppConfig, EmailIngestionConfig, GmailConfig, OutlookDesktopConfig
+
+    captured: list = []
+    monkeypatch.setattr(
+        email_ingest_tool.log, "warning", lambda *args, **kwargs: captured.append(args)
+    )
+    # Ensure any MCP client factory that might exist cannot be built.
+    monkeypatch.setitem(__import__("sys").modules, "src.mcp.client", None)
+    import importlib
+    importlib.invalidate_caches()
+
+    db_path = tmp_path / "gmail_dead.db"
+    storage = JobAgentStorage(db_path=str(db_path))
+
+    config = AppConfig()
+    config.email_ingestion = EmailIngestionConfig(
+        gmail=GmailConfig(enabled=True, method="mcp"),
+        outlook_desktop=OutlookDesktopConfig(enabled=False),
+    )
+
+    engine = EmailIngestEngine(storage=storage, config=config)
+
+    assert engine.adapters == []
+    assert any(
+        "Gmail ingestion enabled in config but no MCP client is wired" in " ".join(map(str, a))
+        for a in captured
+    )
+    assert all(
+        "Gmail ingestion enabled in config but no MCP client is wired" in " ".join(map(str, a))
+        for a in captured
+    )

@@ -77,7 +77,7 @@ class FormReasoner:
 
         # 6. City / Address
         if any(term in combined for term in ["city", "ort", "stadt", "wohnort", "location", "standort"]):
-            city = pers.address.split(",")[0].strip() if pers.address else ""
+            city = pers.city or self._extract_city_from_address(pers.address)
             return {"value": city, "confidence": 1.0, "reasoning": "Core profile city"}
 
         if any(term in combined for term in ["address", "anschrift", "adresse", "street", "strasse"]):
@@ -108,6 +108,27 @@ class FormReasoner:
             return {"value": prefs.workModel, "confidence": 0.90, "reasoning": "Core profile work model preference"}
 
         return None
+
+    def _extract_city_from_address(self, address: Optional[str]) -> str:
+        """Best-effort city extraction from an address string.
+
+        Prefers an explicit postal-code-bearing segment (e.g. '60311 Frankfurt am Main')
+        and strips the leading postal code if present. Never assumes the first comma
+        segment is the city (that is usually the street).
+        """
+        if not address:
+            return ""
+        segments = [s.strip() for s in address.split(",") if s.strip()]
+        if not segments:
+            return ""
+        postal = re.search(r"\b\d{4,5}\b", address)
+        for seg in segments:
+            if postal and postal.group(0) in seg:
+                # Drop a leading postal code, keep the rest of the segment as the city
+                candidate = re.sub(r"^\s*\d{4,5}\s*", "", seg).strip()
+                return candidate or seg
+        # No postal code: the last segment is the city for 'Street, City' layouts
+        return segments[-1]
 
     LEGALLY_SENSITIVE_KEYWORDS = [
         "citizenship", "staatsangehörigkeit", "sponsorship", "visum", "visa",

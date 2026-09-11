@@ -45,12 +45,28 @@ class EmailIngestEngine:
 
             # 2. Gmail via MCP
             if email_cfg.gmail.enabled:
-                self.adapters.append(
-                    GmailMcpAdapter(
-                        mcp_client=None,
-                        search_query="Bewerbung OR Interview OR Application",
+                mcp_client: Optional[Any] = None
+                try:
+                    # Attempt to construct the MCP client for Gmail (e.g. via a
+                    # configured MCP bridge). If none is wired, the adapter would
+                    # silently fetch nothing — so we refuse to append a dead adapter.
+                    from src.mcp.client import get_mcp_client  # type: ignore[attr-defined]
+
+                    mcp_client = get_mcp_client()
+                except Exception:
+                    mcp_client = None
+                if mcp_client is None:
+                    log.warning(
+                        "Gmail ingestion enabled in config but no MCP client is wired — "
+                        "adapter will fetch nothing",
                     )
-                )
+                else:
+                    self.adapters.append(
+                        GmailMcpAdapter(
+                            mcp_client=mcp_client,
+                            search_query="Bewerbung OR Interview OR Application",
+                        )
+                    )
 
             # 3. Generic IMAP
             if email_cfg.generic_imap.enabled:
@@ -108,6 +124,7 @@ class EmailIngestEngine:
                     body=item.body,
                     sender_name=item.sender_name,
                     sender_email=item.sender_email,
+                    enable_llm_fallback=self.config.email_ingestion.llm_fallback,
                 )
 
                 # Match with application record if possible

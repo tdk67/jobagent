@@ -24,6 +24,68 @@ from src.core.storage import parse_flexible_date
 log = logging.getLogger(__name__)
 
 
+def _parse_flexible_iso(date_input: Optional[Any]) -> Optional[str]:
+    """Parses flexible input to a YYYY-MM-DD string (or None)."""
+    if not date_input:
+        return None
+    try:
+        parsed = parse_flexible_date(date_input)
+    except Exception as e:
+        log.debug("Date could not be parsed %r: %s", date_input, e)
+        return None
+    if not parsed:
+        return None
+    # parse_flexible_date accepts datetimes/dates and ISO/dotted strings;
+    # defensively normalize the result to a YYYY-MM-DD string.
+    result = parsed
+    if not isinstance(result, str):
+        result = result.strftime("%Y-%m-%d")
+    return result[:10]
+
+
+def _to_imap_date(iso_date: Optional[str]) -> Optional[str]:
+    """Converts YYYY-MM-DD to IMAP SEARCH date format dd-Mon-yyyy (e.g. 01-Sep-2026)."""
+    if not iso_date:
+        return None
+    try:
+        dt = datetime.strptime(iso_date, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return None
+    # IMAP date format is dd-Mon-yyyy with English month abbreviations
+    return dt.strftime("%d-%b-%Y")
+
+
+def build_imap_search_criteria(
+    start_date: Optional[Any] = None,
+    end_date: Optional[Any] = None,
+    cutoff_date: Optional[Any] = None,
+) -> List[str]:
+    """Builds IMAP SEARCH criteria from flexible date inputs.
+
+    Returns a list of IMAP search keys (e.g. ['SINCE 01-Sep-2026', 'BEFORE 08-Sep-2026'])
+    fed to ``server.search(imap_criteria, 'ALL')``.
+
+    - start+end -> ``SINCE <start> BEFORE <end>``
+    - None/None -> ``ALL``
+    - cutoff only -> ``SINCE <cutoff>``
+    - Parsing failures are silently dropped (the client-side cutoff filter remains a second guard).
+    """
+    start_iso = _parse_flexible_iso(start_date) or _parse_flexible_iso(cutoff_date)
+    end_iso = _parse_flexible_iso(end_date)
+
+    start_imap = _to_imap_date(start_iso)
+    end_imap = _to_imap_date(end_iso)
+
+    criteria: List[str] = []
+    if start_imap:
+        criteria.append(f"SINCE {start_imap}")
+    if end_imap:
+        criteria.append(f"BEFORE {end_imap}")
+    if not criteria:
+        criteria.append("ALL")
+    return criteria
+
+
 def _decode_mime_str(header_val: str) -> str:
     """Safely decodes RFC 2047 MIME encoded words in email headers."""
     if not header_val:
@@ -254,7 +316,7 @@ class ImapAdapter(BaseEmailAdapter):
             server.login(self.username, self.password)
             server.select(self.folder, readonly=True)
 
-            status, messages = server.search(None, "ALL")
+            status, messages = server.search(build_imap_search_criteria(start_date, end_date, cutoff_date), "ALL")
             if status != "OK":
                 return []
 

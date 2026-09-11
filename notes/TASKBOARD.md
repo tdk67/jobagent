@@ -5,7 +5,7 @@
 | F1 | PII purge: sanitize test fixture + squash history + force-push | **done** | commit `04e93ae`, remote history verified CLEAN via fresh clone (2026-09-12, done by lead agent, not via loop) |
 | F2 | Extension message-channel security (postMessage token/PII broadcast, unorigin-checked listener) | **done** | commit `4f6a0d6` [QA: PASS] — broadcast block + window listener deleted, apiToken removed from content payload, runtime-message path intact, 27 tests green |
 | F3 | Gateway auth hardening (Host validation vs DNS rebinding, pair endpoint logging, Docker loopback bind) | **done** | commit `78d425f` [QA: PASS] — Host-header guard on all /api/* + /a2a/* (403 invalid Host), pair logs loopback client, Dockerfile/compose bind 127.0.0.1, run_agent env overrides A2A_HOST/A2A_PORT (CLI>env>cfg); 32 tests green |
-| F4 | Correctness: city bug, IMAP date range, dead LLM fallback, Gmail no-op, Strands model fail-loud | todo | |
+| F4 | Correctness: city bug, IMAP date range, dead LLM fallback, Gmail no-op, Strands model fail-loud | qa-pending | worker done: city extraction fix, build_imap_search_criteria + SINCE/BEFORE wiring, llm_fallback config flag, Gmail dead-adapter loud-warning guard, llm_available fail-loud gating (42 tests green) |
 | F5 | Data integrity: no fabricated roles in AfA import path, remove auto-import magic, gate legal autofills | todo | |
 | F6 | Dead config wiring, duplicate @tool removal, 400 contract fix, README claims | todo | |
 | F7 | Final regression & judge-readiness sweep (evidence only) | todo | |

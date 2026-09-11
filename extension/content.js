@@ -438,7 +438,7 @@
       }
       // 11. Address & Location
       else if (/city|ort|stadt|wohnort/i.test(desc)) {
-        val = pers.city || (pers.address ? pers.address.split(",")[0].trim() : "");
+        val = pers.city || ((pers.address || "").split(",")[1] || "").replace(/^\s*\d{4,5}\s*/, "").trim() || "";
       } else if (/address|adresse|straße|strasse|hausnummer/i.test(desc)) {
         val = pers.street || pers.address;
       } else if (/zip|plz|postleitzahl|postal/i.test(desc)) {

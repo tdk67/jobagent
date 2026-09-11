@@ -77,6 +77,7 @@ class EmailIngestionConfig(BaseModel):
     gmail: GmailConfig = Field(default_factory=GmailConfig)
     outlook_desktop: OutlookDesktopConfig = Field(default_factory=OutlookDesktopConfig)
     generic_imap: GenericImapConfig = Field(default_factory=GenericImapConfig)
+    llm_fallback: bool = False
 
 
 class ReportingConfig(BaseModel):

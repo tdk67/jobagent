@@ -123,14 +123,20 @@ class JobAgentCoordinator:
         return [tool_ingest_emails, tool_generate_compliance_report, tool_archive_job_posting, tool_get_pipeline_statistics]
 
     def _init_strands_agent(self) -> Agent:
-        """Initializes the Strands Agent with session-bound tools and configured model provider."""
+        """Initializes the Strands Agent with session-bound tools and configured model provider.
+
+        Sets ``self.llm_available`` — True only if a provider was explicitly initialized
+        with credentials.
+        """
         tools = self.tools
         model_obj = None
+        llm_available = False
 
         # 1. Check Gemini Provider
         if self.config.agent.provider == "gemini" and os.getenv("GEMINI_API_KEY"):
             try:
                 model_obj = create_strands_gemini_model(config=self.config)
+                llm_available = True
                 log.info(
                     "Initialized Strands GeminiModel with model %s (temperature=%.2f)",
                     self.config.agent.model,
@@ -154,10 +160,18 @@ class JobAgentCoordinator:
                         else self.config.agent.fallback_model
                     )
                     model_obj = BedrockModel(model_id=bedrock_id)
+                    llm_available = True
                     log.info("Initialized BedrockModel with model %s", bedrock_id)
                 except Exception as e:
                     log.warning("Failed to initialize BedrockModel: %s", e, exc_info=True)
                     model_obj = None
+
+        self.llm_available = llm_available
+        if not self.llm_available:
+            log.warning(
+                "No LLM provider configured (set GEMINI_API_KEY or AWS credentials) — "
+                "running deterministic tool-only mode"
+            )
 
         try:
             return Agent(
@@ -178,7 +192,7 @@ class JobAgentCoordinator:
         agent_ok: bool = False
 
         # Strands Agent autonomous reasoning & tool-dispatch loop
-        if self.agent and getattr(self.agent, "model", None):
+        if self.llm_available and self.agent and getattr(self.agent, "model", None):
             mission = (
                 f"Execute autonomous career cycle:\n"
                 f"1. Call `ingest_emails` with limit={email_limit} to triage newly received messages and detect interviews/rejections.\n"

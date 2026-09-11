@@ -73,7 +73,7 @@ def test_coordinator_tools_session_binding(test_coordinator: JobAgentCoordinator
 
 def test_coordinator_deterministic_cycle_fallback(test_coordinator: JobAgentCoordinator):
     """Verifies that run_autonomous_cycle completes reliably even without active cloud LLM."""
-    test_coordinator.agent.model = None
+    test_coordinator.llm_available = False
 
     test_emails = [
         {
@@ -97,7 +97,7 @@ def test_coordinator_deterministic_cycle_fallback(test_coordinator: JobAgentCoor
 
 def test_coordinator_multi_cycle_idempotency(test_coordinator: JobAgentCoordinator):
     """Verifies that running multiple background cycles does not create duplicate entries (H1)."""
-    test_coordinator.agent.model = None
+    test_coordinator.llm_available = False
 
     test_emails = [
         {
@@ -127,3 +127,57 @@ def test_coordinator_multi_cycle_idempotency(test_coordinator: JobAgentCoordinat
     res3 = test_coordinator.run_autonomous_cycle(email_limit=5)
     assert len(test_coordinator.storage.list_interviews()) == 1
     assert test_coordinator.storage.get_statistics()["total_applications"] == 1
+
+
+def test_coordinator_no_provider_creds_llm_unavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """F4 VP4: coordinator built with no provider creds -> llm_available is False, and
+    run_autonomous_cycle completes via the deterministic path WITHOUT attempting an
+    agent LLM call."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
+
+    db_path = tmp_path / "no_creds.db"
+    out_dir = tmp_path / "output"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    config = AppConfig(
+        agent=AgentConfig(provider="gemini", model="gemini-3.8-flash", temperature=0.1),
+        storage=StorageConfig(database_path=str(db_path)),
+        reporting=ReportingConfig(output_dir=str(out_dir), enable_pdf_export=False),
+    )
+    storage = JobAgentStorage(str(db_path))
+    profile = CandidateProfile(
+        personal=PersonalInfo(fullName="Test Candidate", email="candidate@test.com")
+    )
+    coordinator = JobAgentCoordinator(config=config, storage=storage, profile=profile)
+
+    assert coordinator.llm_available is False
+
+    # A Mock agent that raises if called — proves the LLM branch is never entered.
+    class ExplodingAgent:
+        name = "JobAgent"
+
+        def __call__(self, *args, **kwargs):  # pragma: no cover
+            raise AssertionError("agent LLM call must not be attempted without credentials")
+
+    coordinator.agent = ExplodingAgent()  # type: ignore[assignment]
+
+    test_emails = [
+        {
+            "entry_id": "test_no_llm_1",
+            "sender_name": "Acme Corp",
+            "sender_email": "jobs@acme.com",
+            "subject": "Ihre Bewerbung bei Acme Corp",
+            "body": "Vielen Dank für Ihre Bewerbung. Ihre Unterlagen sind eingegangen.",
+            "received_time": "2026-09-09T09:00:00Z",
+        }
+    ]
+    coordinator.storage.upsert_application("Acme Corp", "Backend Developer")
+    coordinator.email_engine.adapters = [MockEmailAdapter(test_emails)]
+
+    cycle_res = coordinator.run_autonomous_cycle(email_limit=5)
+    assert cycle_res["agent_ok"] is False
+    assert cycle_res["triage_summary"]["total_scanned"] == 1
+    assert cycle_res["triage_summary"]["confirmations_found"] == 1
+    assert cycle_res["agent_briefing"] is not None

@@ -201,3 +201,42 @@ def test_form_reasoner_passwords_and_security(temp_db: JobAgentStorage, mock_pro
     # Work authorization matched
     assert "auth" in mappings
     assert "Ja" in mappings["auth"] or "Arbeitserlaubnis" in mappings["auth"] or "EU Citizen" in mappings["auth"]
+
+
+def test_form_reasoner_city_field_maps_to_city_not_street(temp_db: JobAgentStorage):
+    """F4 VP1: a field labeled 'City'/'Ort'/'Stadt' must map to profile.personal.city
+    (e.g. 'Frankfurt am Main'), NOT the street (the first address segment)."""
+    profile = CandidateProfile(
+        personal=PersonalInfo(
+            fullName="Jane Doe",
+            email="jane.doe@example.com",
+            phone="+49 150 0000000",
+            street="Musterstrasse 1",
+            city="Frankfurt am Main",
+            postalCode="60311",
+            address="Musterstrasse 1, 60311 Frankfurt am Main, Deutschland",
+        )
+    )
+    reasoner = FormReasoner(storage=temp_db, profile=profile)
+
+    for label in ["City", "Ort", "Stadt", "Wohnort"]:
+        res = reasoner.reason_form([{"fieldId": f"f_{label}", "label": label, "type": "text"}])
+        assert res["mapped_fields"] == 1, f"label {label!r} not mapped"
+        assert res["mappings"][f"f_{label}"] == "Frankfurt am Main", f"label {label!r} -> {res['mappings'][f'f_{label}']!r}"
+
+
+def test_form_reasoner_city_falls_back_to_postal_segment(temp_db: JobAgentStorage):
+    """F4 VP1: without an explicit pers.city, the reasoner falls back to the address
+    segment containing the postal code — NOT segment 0 (the street)."""
+    profile = CandidateProfile(
+        personal=PersonalInfo(
+            fullName="Jane Doe",
+            email="jane.doe@example.com",
+            address="Musterstrasse 1, 60311 Frankfurt am Main, Deutschland",
+            city=None,
+        )
+    )
+    reasoner = FormReasoner(storage=temp_db, profile=profile)
+
+    res = reasoner.reason_form([{"fieldId": "f_city", "label": "City", "type": "text"}])
+    assert res["mappings"]["f_city"] == "Frankfurt am Main", res["mappings"]["f_city"]
