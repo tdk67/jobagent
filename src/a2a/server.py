@@ -1,9 +1,13 @@
-"""FastAPI HTTP and SSE server exposing the A2A (Agent-to-Agent) Interface and Extension API."""
+"""FastAPI HTTP and SSE server exposing the A2A (Agent-to-Agent) Interface and Extension API.
+
+Pure API presentation layer delegating all business logic to the shared Service Layer.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import base64
+from contextlib import asynccontextmanager
 import json
 import logging
 import os
@@ -11,12 +15,22 @@ import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
+from urllib.parse import urlsplit
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request, Security
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from urllib.parse import urlsplit
+
+from src.a2a.protocol import A2ACapability, A2AEvent, TaskEnvelope, TaskResponse
+from src.core.config import AppConfig, load_config
+from src.core.profile import CandidateProfile, load_profile
+from src.core.storage import JobAgentStorage
+from src.services.container import ServiceContainer, get_service_container
+from src.tools.form.reasoner import FormReasoner
+
+log = logging.getLogger(__name__)
+security_bearer = HTTPBearer(auto_error=False)
 
 ROBOTS_TXT = """User-agent: *
 Allow: /
@@ -56,33 +70,11 @@ JobAgent is a local-first AI career agent built with the AWS Strands Agents SDK.
 - Authentication: Token-based via `Authorization: Bearer <token>` or `X-JobAgent-Token: <token>`.
 """
 
-
-from src.a2a.protocol import A2ACapability, A2AEvent, TaskEnvelope, TaskResponse
-from src.core.config import AppConfig, load_config
-from src.core.profile import CandidateProfile, load_profile
-from src.core.storage import JobAgentStorage
-from src.tools.email_ingest_tool import EmailIngestEngine
-from src.tools.form.reasoner import FormReasoner
-from src.tools.job_archive_tool import JobArchiveEngine
-from src.tools.report_render_tool import ReportRenderEngine
-
-log = logging.getLogger(__name__)
-security_bearer = HTTPBearer(auto_error=False)
-
-
-# Hosts permitted to reach /api/* and /a2a/* (plus the configured gateway host).
-# This defeats DNS-rebinding: even when a malicious page's JS connects to a
-# loopback-bound gateway from a browser, its Host header will be the attacker's
-# domain and the request is rejected before any handler runs.
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def _host_header_value(raw_host: Optional[str]) -> Optional[str]:
-    """Extract and normalize the hostname from a Host header value.
-
-    Handles "127.0.0.1[:port]", "localhost[:port]", and IPv6 literals like
-    "[::1]:8765". Returns None for malformed or absent input.
-    """
+    """Extract and normalize the hostname from a Host header value."""
     if not raw_host:
         return None
     try:
@@ -109,16 +101,17 @@ def _is_gateway_path(path: str) -> bool:
     return path.startswith("/api/") or path.startswith("/a2a/") or path == "/dashboard"
 
 
-
 def create_a2a_app(
     config: Optional[AppConfig] = None,
     storage: Optional[JobAgentStorage] = None,
     profile: Optional[CandidateProfile] = None,
     api_token: Optional[str] = None,
+    services: Optional[ServiceContainer] = None,
 ) -> FastAPI:
     cfg = config or load_config()
     db = storage or JobAgentStorage(cfg.storage.database_path)
     user_profile = profile or load_profile()
+    svc = services or ServiceContainer(config=cfg, storage=db, profile=user_profile)
 
     active_token = api_token or os.getenv("JOBAGENT_API_TOKEN")
     if not active_token:
@@ -137,14 +130,12 @@ def create_a2a_app(
 
     log.info("JobAgent API Token: %s", active_token)
     print(f"\n[JobAgent] API Token: {active_token}")
-    print(f"   (Persisted in .jobagent_token for browser extension & CLI)\n")
+    print("   (Persisted in .jobagent_token for browser extension & CLI)\n")
 
     def verify_token(
         credentials: Optional[HTTPAuthorizationCredentials] = Security(security_bearer),
         x_token: Optional[str] = Header(None, alias="X-JobAgent-Token"),
     ) -> bool:
-        # P1 fix: tokens must never be passed in URL query strings (no ?token=... in browser/proxy logs).
-        # Authentication is strictly via Authorization: Bearer <token> or X-JobAgent-Token: <token>.
         supplied = None
         if credentials and credentials.credentials:
             supplied = credentials.credentials
@@ -158,21 +149,36 @@ def create_a2a_app(
             )
         return True
 
-    email_engine = EmailIngestEngine(storage=db, config=cfg)
-    archive_engine = JobArchiveEngine(storage=db, config=cfg)
-    report_engine = ReportRenderEngine(storage=db, profile=user_profile, config=cfg)
-    form_reasoner = FormReasoner(storage=db, profile=user_profile, config=cfg)
+    def verify_token_or_loopback(
+        request: Request,
+        credentials: Optional[HTTPAuthorizationCredentials] = Security(security_bearer),
+        x_token: Optional[str] = Header(None, alias="X-JobAgent-Token"),
+    ) -> bool:
+        client_host = request.client.host if request.client else ""
+        if client_host in ("127.0.0.1", "localhost", "::1"):
+            return True
+        return verify_token(credentials=credentials, x_token=x_token)
+
+    form_reasoner = FormReasoner(storage=svc.storage, profile=user_profile, config=cfg)
+
+    @asynccontextmanager
+    async def lifespan(app_instance: FastAPI):
+        svc.emails.scheduler.start()
+        try:
+            yield
+        finally:
+            svc.emails.scheduler.stop()
 
     app = FastAPI(
         title="JobAgent A2A Gateway",
         description="Agent-to-Agent interface and browser copilot API for JobAgent",
         version="1.0.0",
+        lifespan=lifespan,
     )
     app.state.api_token = active_token
+    app.state.services = svc
+    app.state.email_scheduler = svc.emails.scheduler
 
-    # Host-header validation middleware (F3, review finding S2): DNS-rebinding
-    # protection for every gateway route regardless of client IP. Only loopback
-    # hosts or the explicitly configured gateway host may reach /api/* and /a2a/*.
     @app.middleware("http")
     async def validate_host_header(request: Request, call_next):
         if _is_gateway_path(request.url.path):
@@ -181,7 +187,6 @@ def create_a2a_app(
                 return JSONResponse(status_code=403, content={"detail": "Invalid Host header"})
         return await call_next(request)
 
-    # Secure CORS configuration: Restrict origins derived from active config
     allowed_origins = [
         f"http://{cfg.a2a.host}:{cfg.a2a.port}",
         f"http://localhost:{cfg.a2a.port}",
@@ -196,7 +201,6 @@ def create_a2a_app(
         allow_headers=["Authorization", "X-JobAgent-Token", "Content-Type"],
     )
 
-    # In-memory queue for SSE event broadcast
     event_subscribers: List[asyncio.Queue] = []
 
     async def broadcast_event(event: A2AEvent) -> None:
@@ -208,14 +212,10 @@ def create_a2a_app(
                 if q in event_subscribers:
                     event_subscribers.remove(q)
 
-    # 1. Health & Discovery (Public probes)
+    # 1. Health & Discovery
     @app.get("/health")
     async def health() -> Dict[str, str]:
-        return {
-            "status": "ok",
-            "agent": "JobAgent",
-            "version": "1.0.0",
-        }
+        return {"status": "ok", "agent": "JobAgent", "version": "1.0.0"}
 
     @app.get("/robots.txt", response_class=PlainTextResponse)
     async def get_robots_txt() -> str:
@@ -225,7 +225,6 @@ def create_a2a_app(
     @app.get("/.well-known/llms.txt", response_class=PlainTextResponse)
     async def get_llms_txt() -> str:
         return LLMS_TXT
-
 
     @app.get("/a2a/v1/capabilities", dependencies=[Depends(verify_token)])
     async def get_capabilities() -> List[A2ACapability]:
@@ -281,26 +280,20 @@ def create_a2a_app(
         try:
             if action == "triage_emails":
                 limit = payload.get("limit", 50)
-                res = email_engine.run_triage(limit=limit)
-
-                # Broadcast actionable alert if interview was detected
+                res = svc.emails.triage_inbox(
+                    limit=limit,
+                    start_date=payload.get("start_date"),
+                    end_date=payload.get("end_date"),
+                )
                 if res.get("interviews_found", 0) > 0:
                     for alert in res.get("actionable_alerts", []):
-                        event = A2AEvent(
-                            event_type="interview_detected",
-                            priority="high",
-                            payload=alert,
-                        )
+                        event = A2AEvent(event_type="interview_detected", priority="high", payload=alert)
                         background_tasks.add_task(broadcast_event, event)
 
-                return TaskResponse(
-                    task_id=envelope.task_id,
-                    status="completed",
-                    result=res,
-                )
+                return TaskResponse(task_id=envelope.task_id, status="completed", result=res)
 
             elif action == "archive_job":
-                res = archive_engine.archive(
+                res = svc.archives.archive(
                     company=payload.get("company", "Unknown Company"),
                     role=payload.get("role", "Software Engineer"),
                     job_url=payload.get("job_url"),
@@ -312,90 +305,54 @@ def create_a2a_app(
                     artifacts.append(res["snapshot_pdf_path"])
                 if res.get("markdown_path"):
                     artifacts.append(res["markdown_path"])
-
-                return TaskResponse(
-                    task_id=envelope.task_id,
-                    status="completed",
-                    result=res,
-                    artifacts=artifacts,
-                )
+                return TaskResponse(task_id=envelope.task_id, status="completed", result=res, artifacts=artifacts)
 
             elif action == "generate_compliance_report":
                 report_type = payload.get("report_type", "dashboard")
-                res = report_engine.generate(view_type=report_type, export_pdf=True)
+                res = svc.reports.generate(
+                    view_type=report_type,
+                    export_pdf=True,
+                    start_date=payload.get("start_date"),
+                    end_date=payload.get("end_date"),
+                )
                 artifacts = []
                 if res.get("pdf_path"):
                     artifacts.append(res["pdf_path"])
                 if res.get("html_path"):
                     artifacts.append(res["html_path"])
-
-                return TaskResponse(
-                    task_id=envelope.task_id,
-                    status="completed",
-                    result=res,
-                    artifacts=artifacts,
-                )
+                return TaskResponse(task_id=envelope.task_id, status="completed", result=res, artifacts=artifacts)
 
             elif action == "get_status":
-                stats = db.get_statistics()
-                interviews = db.list_interviews()
-                return TaskResponse(
-                    task_id=envelope.task_id,
-                    status="completed",
-                    result={"statistics": stats, "interviews": interviews},
-                )
+                status_res = svc.applications.get_status()
+                return TaskResponse(task_id=envelope.task_id, status="completed", result=status_res)
 
             elif action == "query_qa":
                 q = payload.get("question", "")
-                ans = db.get_qa_answer(q)
-                return TaskResponse(
-                    task_id=envelope.task_id,
-                    status="completed",
-                    result={"question": q, "answer": ans},
-                )
+                ans = svc.applications.get_qa_answer(q)
+                return TaskResponse(task_id=envelope.task_id, status="completed", result={"question": q, "answer": ans})
 
             else:
                 raise HTTPException(status_code=400, detail=f"Unknown A2A action: {action}")
 
         except HTTPException:
-            # Contract fix (F6): validation errors (unknown action) must surface as
-            # their real HTTP status (400), not be swallowed by the generic handler
-            # and returned as HTTP 200 with status "failed".
             raise
-
         except Exception as err:
             log.warning("Task execution failed for action %s: %s", action, err, exc_info=True)
-            return TaskResponse(
-                task_id=envelope.task_id,
-                status="failed",
-                error=str(err),
-            )
+            return TaskResponse(task_id=envelope.task_id, status="failed", error=str(err))
 
-    # 3. Status & Analytics
+    # 3. Status & Web Dashboard
     @app.get("/a2a/v1/status", dependencies=[Depends(verify_token)])
     async def get_agent_status() -> Dict[str, Any]:
-        return {
-            "statistics": db.get_statistics(),
-            "interviews": db.list_interviews(),
-            "recent_applications": db.list_applications(limit=5),
-        }
+        return svc.applications.get_status()
 
-    # 3b. Interactive / Visual Web Dashboard (P1 fix: clean URL, zero credentials in URL)
     @app.get("/dashboard", response_class=HTMLResponse)
     async def get_dashboard() -> HTMLResponse:
-        """Renders live HTML dashboard for local single-user inspection.
-        
-        Security Model:
-        - Strictly protected by validate_host_header middleware (Host: loopback/localhost only).
-        - Bound to local loopback interface (127.0.0.1) so remote network actors cannot reach it.
-        - Avoids embedding tokens in browser query params (?token=...) or browsing history.
-        """
-        res = report_engine.generate(view_type="dashboard", export_pdf=False)
+        res = svc.reports.generate(view_type="dashboard", export_pdf=False)
         html_file = Path(res["html_path"])
         html_content = html_file.read_text(encoding="utf-8")
         return HTMLResponse(content=html_content)
 
-    # 4. SSE Real-Time Event Stream for Parent Personal Agents
+    # 4. SSE Real-Time Event Stream
     @app.get("/a2a/v1/events", dependencies=[Depends(verify_token)])
     async def sse_events(request: Request) -> StreamingResponse:
         queue: asyncio.Queue = asyncio.Queue()
@@ -403,7 +360,6 @@ def create_a2a_app(
 
         async def event_generator() -> AsyncGenerator[str, None]:
             try:
-                # Send initial connection event
                 yield f"data: {json.dumps({'event': 'connected', 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
                 while True:
                     if await request.is_disconnected():
@@ -412,7 +368,6 @@ def create_a2a_app(
                         event: A2AEvent = await asyncio.wait_for(queue.get(), timeout=15.0)
                         yield f"event: {event.event_type}\ndata: {json.dumps(event.model_dump())}\n\n"
                     except asyncio.TimeoutError:
-                        # Keep-alive heartbeat
                         yield ": keepalive\n\n"
             finally:
                 if queue in event_subscribers:
@@ -420,63 +375,54 @@ def create_a2a_app(
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-    # 5. Extension API Endpoints (Decoupled, zero hardcoded PII)
+    # 5. Extension API Endpoints
     @app.get("/api/v1/auth/pair")
     async def auto_pair_extension(request: Request) -> Dict[str, str]:
-        """Allows automatic pairing for the local browser extension on loopback."""
         client_host = request.client.host if request.client else ""
         if client_host not in ("127.0.0.1", "localhost", "::1"):
             raise HTTPException(status_code=403, detail="Auto-pairing only allowed from local loopback")
-        log.info("Extension paired from %s", client_host)
         return {"token": active_token, "status": "paired"}
 
     @app.get("/api/v1/profile", dependencies=[Depends(verify_token)])
     async def get_extension_profile() -> Dict[str, Any]:
-        """Provides candidate profile dynamically to the browser extension."""
         return user_profile.model_dump()
 
     @app.post("/api/v1/archive", dependencies=[Depends(verify_token)])
     async def extension_archive_job(payload: Dict[str, Any]) -> Dict[str, Any]:
-        """1-click archive endpoint called from Chrome extension popup."""
-        res = archive_engine.archive(
+        return svc.archives.archive(
             company=payload.get("company", "Unknown Company"),
             role=payload.get("role", "Software Engineer"),
             job_url=payload.get("url"),
             raw_html=payload.get("html"),
         )
-        return res
 
     @app.get("/api/v1/qa", dependencies=[Depends(verify_token)])
     async def extension_query_qa(question: str) -> Dict[str, Any]:
-        ans = db.get_qa_answer(question)
+        ans = svc.applications.get_qa_answer(question)
         return {"question": question, "answer": ans}
 
     @app.post("/api/v1/form/reason", dependencies=[Depends(verify_token)])
     async def reason_form_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Whole-form semantic reasoning endpoint using Gemini 3.8 Flash & QA memory."""
         fields = payload.get("fields", [])
         page_url = payload.get("url")
         return form_reasoner.reason_form(fields=fields, page_url=page_url)
 
     @app.post("/api/v1/form/learn", dependencies=[Depends(verify_token)])
     async def learn_form_field(payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Continuous learning endpoint: persists newly answered question into QA memory."""
         q = payload.get("question", "").strip()
         a = payload.get("answer", "").strip()
         cat = payload.get("category", "user_taught")
         if q and a:
-            db.save_qa_answer(question_text=q, answer=a, category=cat, verified=1)
+            svc.applications.save_qa_answer(question=q, answer=a, category=cat, verified=1)
             return {"status": "ok", "question": q, "saved": True}
         raise HTTPException(status_code=400, detail="Missing question or answer")
 
     @app.get("/api/v1/form/memory", dependencies=[Depends(verify_token)])
     async def get_qa_memory() -> Dict[str, Any]:
-        """Returns all currently stored QA memory entries."""
-        return {"memory": db.list_qa_memory()}
+        return {"memory": svc.applications.list_qa_memory()}
 
     @app.get("/api/v1/documents/bundle", dependencies=[Depends(verify_token)])
     async def get_document_bundle() -> Dict[str, Any]:
-        """Provides base64 data URLs for user's CV, cover letter, and references for browser extension upload."""
         docs = user_profile.documents
         bundle: Dict[str, Any] = {}
 
@@ -486,7 +432,6 @@ def create_a2a_app(
             p = Path(path_str)
             if not p.exists():
                 return
-            # Read bytes off the event-loop thread to avoid blocking
             content = await asyncio.to_thread(p.read_bytes)
             bundle[key] = {
                 "filename": p.name,
@@ -503,7 +448,6 @@ def create_a2a_app(
 
     @app.post("/api/v1/cover_letter/generate", dependencies=[Depends(verify_token)])
     async def generate_cover_letter_api(payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Generates a DIN 5008 cover letter dynamically tailored to target company and role."""
         company = payload.get("company", "Unternehmen")
         role = payload.get("role", "Software Engineer")
         lang = payload.get("lang", "de")
@@ -524,5 +468,36 @@ def create_a2a_app(
             raise HTTPException(status_code=422, detail=str(e))
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Cover letter generation error: {e}")
+
+    # 6. Observability & Recurring Ingest Endpoints
+    @app.get("/api/v1/triage/status", dependencies=[Depends(verify_token_or_loopback)])
+    async def get_triage_status() -> Dict[str, Any]:
+        return svc.emails.get_scheduler_status()
+
+    @app.post("/api/v1/triage/run", dependencies=[Depends(verify_token_or_loopback)])
+    async def trigger_triage_run() -> Dict[str, Any]:
+        return await svc.emails.trigger_scheduler_run()
+
+    @app.post("/api/v1/triage/config", dependencies=[Depends(verify_token_or_loopback)])
+    async def update_triage_config(payload: Dict[str, Any]) -> Dict[str, Any]:
+        return svc.emails.update_scheduler_config(
+            enabled=payload.get("enabled"),
+            schedule_mode=payload.get("schedule_mode"),
+            schedule_day=payload.get("schedule_day"),
+            schedule_time=payload.get("schedule_time"),
+            interval_minutes=payload.get("interval_minutes"),
+        )
+
+    # 7. Email Inspection & Native Desktop Launch Endpoints
+    @app.get("/api/v1/emails/{entry_id}", dependencies=[Depends(verify_token_or_loopback)])
+    async def get_email_details(entry_id: str) -> Dict[str, Any]:
+        email_data = svc.emails.get_email_details(entry_id)
+        if not email_data:
+            raise HTTPException(status_code=404, detail="Email not found in database")
+        return email_data
+
+    @app.post("/api/v1/emails/{entry_id}/open", dependencies=[Depends(verify_token_or_loopback)])
+    async def open_email_in_desktop(entry_id: str) -> Dict[str, Any]:
+        return svc.emails.open_email_in_desktop(entry_id)
 
     return app

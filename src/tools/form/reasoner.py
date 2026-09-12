@@ -82,17 +82,17 @@ class FormReasoner:
         if any(term in combined for term in ["email", "e-mail", "mail address", "e-mail-adresse"]) or tag_type == "email":
             return {"value": pers.email, "confidence": 1.0, "reasoning": "Core profile email"}
 
-        # 5. Phone
-        if any(term in combined for term in ["phone", "telefon", "mobile", "handy", "rufnummer", "contact number"]) or tag_type == "tel":
-            return {"value": pers.phone, "confidence": 1.0, "reasoning": "Core profile phone"}
-
-        # 5a. Phone country code / dialing prefix (e.g. "Länder-/Regionsvorwahl", "Country Code")
-        # Must come AFTER the phone check to avoid false-positives on plain "Telefon" labels.
+        # 5. Phone country code / dialing prefix (e.g. "Länder-/Regionsvorwahl", "Country Code")
+        # Evaluated before general phone to prevent "phone code" matching general "phone".
         if any(term in combined for term in [
-            "länder", "regionsvorwahl", "vorwahl", "country code", "dialing code",
-            "phone code", "country prefix", "area code",
+            "länder", "laender", "regionsvorwahl", "vorwahl", "country code", "dialing code",
+            "dial code", "phone code", "country prefix", "area code",
         ]) and pers.phoneCountryCode:
             return {"value": pers.phoneCountryCode, "confidence": 1.0, "reasoning": "Core profile phone country code"}
+
+        # 5a. Phone
+        if any(term in combined for term in ["phone", "telefon", "mobile", "handy", "rufnummer", "contact number"]) or tag_type == "tel":
+            return {"value": pers.phone, "confidence": 1.0, "reasoning": "Core profile phone"}
 
         # 6. Preferred Job Location / Standort (Not residential street)
         if any(term in combined for term in ["welchen standort", "bevorzugter standort", "gewünschter standort", "target location", "primary location"]) or (
@@ -109,7 +109,7 @@ class FormReasoner:
                 return {"value": city, "confidence": 1.0, "reasoning": "Core profile city"}
 
         # 8. Country of Residence
-        if any(term in combined for term in ["land des aktuellen wohnsitzes", "aktuellen wohnsitz", "wohnsitzland", "country of residence", "residence country"]):
+        if any(term in combined for term in ["land des aktuellen wohnsitzes", "aktuellen wohnsitz", "wohnsitzland", "country of residence", "residence country", "wohnsitz"]):
             country = pers.countryDe or pers.countryEn
             if country:
                 return {"value": country, "confidence": 1.0, "reasoning": "Configured country of residence"}
@@ -117,36 +117,32 @@ class FormReasoner:
         if any(term in combined for term in ["address", "anschrift", "adresse", "street", "strasse"]) and not any(k in combined for k in ["email", "e-mail", "mail"]):
             return {"value": pers.address, "confidence": 1.0, "reasoning": "Core profile address"}
 
-        # 9. Language Proficiency (Dynamically derived from candidate's profile configuration - zero hardcoded levels)
+        # 9. Language Proficiency: Match profile languages (including DE/EN canonical pairs)
         for lang_name, lang_level in (self.profile.languages or {}).items():
             if not lang_level:
                 continue
             norm_lang = lang_name.lower().strip()
-            aliases = [norm_lang]
+            terms = [norm_lang]
             if norm_lang in ("german", "deutsch"):
-                aliases.extend(["deutsch", "german", "deutschkenntnisse"])
+                terms.extend(["deutsch", "german"])
             elif norm_lang in ("english", "englisch"):
-                aliases.extend(["englisch", "english", "englischkenntnisse"])
-            elif norm_lang in ("french", "französisch", "franzosisch"):
-                aliases.extend(["französisch", "franzosisch", "french"])
-            elif norm_lang in ("spanish", "spanisch"):
-                aliases.extend(["spanisch", "spanish"])
-            elif norm_lang in ("italian", "italienisch"):
-                aliases.extend(["italienisch", "italian"])
+                terms.extend(["englisch", "english"])
 
-            if any(alias in combined for alias in aliases) and any(
+            if any(t in combined for t in terms) and any(
                 k in combined for k in ["kenntnis", "sprach", "level", "proficiency", "wie gut", "niveau", "skills"]
             ):
                 return {"value": str(lang_level), "confidence": 1.0, "reasoning": f"Profile configured language proficiency for {lang_name}"}
 
         # 10. Work Authorization / Legal Right to Work
         if any(term in combined for term in ["arbeitserlaubnis", "work authorization", "work permit", "legal right to work", "erlaubnis in dem land"]):
+            if tag_type in ["select", "radio", "combobox", "div"] or field.get("options"):
+                return {"value": "Ja", "confidence": 1.0, "reasoning": "Candidate has full work authorization (EU/German citizen)"}
             auth_val = pers.workAuthorizationDe or pers.workAuthorizationEn or "Ja"
             return {"value": auth_val, "confidence": 1.0, "reasoning": "Configured work authorization status"}
 
         # 11. Prior Employment at Target Company
         if (
-            any(term in combined for term in ["bereits angestellt", "previously employed", "bereits gearbeitet", "früher beschäftigt", "früher angestellt"])
+            any(term in combined for term in ["bereits angestellt", "previously employed", "bereits gearbeitet", "früher beschäftigt", "früher angestellt", "gruppe angestellt"])
             or (("bereits" in combined or "früher" in combined or "previously" in combined) and ("angestellt" in combined or "beschäftigt" in combined or "employed" in combined or "gearbeitet" in combined))
         ):
             return {"value": "Nein", "confidence": 1.0, "reasoning": "No prior employment with company"}
@@ -439,42 +435,26 @@ class FormReasoner:
                 "options": f.get("options", []),
             })
 
-        prompt = f"""You are JobAgent's intelligent form-filling reasoning engine.
-Analyze the following job application form fields (in German or English) and deduce the most appropriate, truthful answer for each field based on the candidate's profile and established answers.
+        try:
+            from src.utils.prompt_loader import load_prompt
+            prompt_template = load_prompt("form_reasoner.txt")
+            prompt = prompt_template.format(
+                personal_json=json.dumps(pers, ensure_ascii=False),
+                languages_json=json.dumps(languages, ensure_ascii=False),
+                skills_json=json.dumps(tech, ensure_ascii=False),
+                preferences_json=json.dumps(prefs, ensure_ascii=False),
+                answers_json=json.dumps(common, ensure_ascii=False),
+                fields_json=json.dumps(simplified_fields, indent=2, ensure_ascii=False),
+            )
+        except Exception as e:
+            log.debug("Form prompt load fallback: %s", e)
+            prompt = (
+                "You are JobAgent's intelligent form-filling reasoning engine.\n"
+                f"Candidate: {json.dumps(pers, ensure_ascii=False)}\n"
+                f"Fields: {json.dumps(simplified_fields, indent=2, ensure_ascii=False)}\n"
+                "Output strictly valid JSON with field_mappings: {field_id: {value, confidence, reasoning}}."
+            )
 
-Candidate Profile:
-- Personal: {json.dumps(pers, ensure_ascii=False)}
-- Languages: {json.dumps(languages, ensure_ascii=False)}
-- Technical Skills: {json.dumps(tech, ensure_ascii=False)}
-- Preferences: {json.dumps(prefs, ensure_ascii=False)}
-- Established Answers: {json.dumps(common, ensure_ascii=False)}
-
-Form Fields to Answer:
-{json.dumps(simplified_fields, indent=2, ensure_ascii=False)}
-
-Guidelines:
-1. For language proficiency questions, match strictly against the candidate's configured "Languages" dictionary provided above. Select the option or level corresponding to the candidate's actual configured level for that language. Never invent language levels.
-2. For job location questions, use the candidate's preferred work location from Preferences (Preferences.locations), or leave null if not configured. Never use their home street address.
-3. For select/radio fields with options, select the exact option value or text that best matches the candidate's profile.
-4. For questions regarding experience years, match against the candidate's skills.
-5. For German questions, respond accurately in German or select the matching German option.
-6. Work authorization, legal status, and visa requirements must be derived strictly from the candidate's profile and established answers.
-7. For open essay or motivation questions (e.g. "Warum möchten Sie bei uns arbeiten?", "Why are you interested in this role?", "Motivationsschreiben"), craft a concise, professional 1-2 paragraph response tailored to the candidate's core achievements and the target role.
-8. For headline or professional title questions, use the candidate's professional headline from Personal.headline.
-9. For summary or bio questions, provide the candidate's professional summary in the matching language (German or English).
-10. If a field cannot be answered truthfully from the profile context, leave "value" as null.
-
-Output strictly valid JSON conforming to this schema:
-{{
-  "field_mappings": {{
-    "<field_id>": {{
-      "value": "<answer or selected option string>",
-      "confidence": <float between 0.0 and 1.0>,
-      "reasoning": "<brief explanation>"
-    }}
-  }}
-}}
-"""
         res_text = call_gemini_semantic_analysis(
             prompt=prompt,
             model_id=self.config.agent.model,
@@ -484,13 +464,31 @@ Output strictly valid JSON conforming to this schema:
         if not res_text:
             return {}
 
-        try:
-            cleaned = res_text.strip()
-            if cleaned.startswith("```"):
-                cleaned = re.sub(r"^```(?:json)?\n", "", cleaned)
-                cleaned = re.sub(r"\n```$", "", cleaned)
-            parsed = json.loads(cleaned)
-            return parsed.get("field_mappings", {})
-        except Exception as e:
-            log.warning("Failed to parse Gemini form reasoning response: %s", e, exc_info=True)
-            return {}
+        for attempt in range(2):
+            try:
+                cleaned = res_text.strip()
+                if "```json" in cleaned:
+                    cleaned = cleaned.split("```json")[1].split("```")[0].strip()
+                elif "```" in cleaned:
+                    cleaned = cleaned.split("```")[1].split("```")[0].strip()
+                parsed = json.loads(cleaned)
+                return parsed.get("field_mappings", {})
+            except Exception as e:
+                log.warning("Attempt %d: Failed to parse Gemini form reasoning response: %s", attempt + 1, e)
+                if attempt == 0:
+                    retry_prompt = (
+                        f"{prompt}\n\n"
+                        f"[SELF-CORRECTION REQUIRED]\n"
+                        f"Your previous response was not valid JSON ({e}).\n"
+                        f"Previous raw output: {res_text[:400]}\n"
+                        f"Please output strictly valid JSON conforming to the requested schema."
+                    )
+                    res_text = call_gemini_semantic_analysis(
+                        prompt=retry_prompt,
+                        model_id=self.config.agent.model,
+                        temperature=self.config.agent.temperature,
+                    )
+                    if not res_text:
+                        break
+
+        return {}

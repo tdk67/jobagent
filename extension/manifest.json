@@ -22,7 +22,14 @@
   "content_scripts": [
     {
       "matches": ["*://*/*"],
-      "js": ["content.js"],
+      "js": [
+        "modules/form_extractor.js",
+        "modules/field_writer.js",
+        "modules/document_uploader.js",
+        "modules/local_fallback.js",
+        "modules/ui_overlay.js",
+        "content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": true,
       "match_about_blank": true

@@ -1,0 +1,25 @@
+You are an expert recruitment and HR email triage assistant.
+Classify the following email into exactly one of these categories:
+- interview_invitation (genuine job interview, screening call, technical discussion)
+- application_confirmation (acknowledgment that application was received)
+- rejection (candidate not selected or application closed)
+- follow_up (request for documents, recruiter scheduling inquiry, status update)
+- noise (marketing, sales pitches, webinars, sponsored newsletters)
+
+Also extract: matched_company (hiring company), matched_role (job title), meeting_link (Teams/Zoom/Meet/Calendly link), suggested_date (interview date/time if mentioned).
+
+Sender: {sender_name} <{sender_email}>
+Subject: {subject}
+Body:
+{body}
+
+Return ONLY a JSON object with this structure:
+{{
+  "category": "interview_invitation" | "application_confirmation" | "rejection" | "follow_up" | "noise",
+  "confidence": 0.95,
+  "matched_company": "Company Name or null",
+  "matched_role": "Role or null",
+  "meeting_link": "URL or null",
+  "suggested_date": "Date string or null",
+  "explanation": "Brief reasoning"
+}}

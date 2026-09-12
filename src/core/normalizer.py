@@ -19,47 +19,26 @@ from typing import Dict, Optional, Set
 
 log = logging.getLogger(__name__)
 
-# Non-company aggregators, relay domains, and noise strings
-NOISE_COMPANY_PATTERNS: Set[str] = {
-    "linkedin",
-    "h linkedin",
-    "apply with linkedin",
-    "bewerben mit linkedin",
-    "stepstone",
-    "indeed",
-    "join.com",
-    "bamboohr",
-    "notifications@app.bamboohr.com",
-    "personio",
-    "greenhouse",
-    "workday",
-    "lever",
-    "smartrecruiters",
-    "softgarden",
-    "dvinci",
-    "recruitee",
-    "ashby",
-    "recruiting",
-    "talent acquisition",
-    "karriere",
-    "karriere-team",
-    "recruiting-team",
-    "hiring-team",
-    "hr-team",
-    "bewerbung",
-    "bewerbungen",
-    "careers",
-    "noreply",
-    "no-reply",
-    "donotreply",
-    "candidate",
-    "bewerber",
-    "unknown",
-    "unbekannt",
-    "uns eingegangen",
-    "ist eingegangen",
-    "bewerbung eingegangen",
-}
+# Non-company aggregators, relay domains, and noise strings loaded from resources/
+def _load_noise_patterns() -> Set[str]:
+    """Loads noise company patterns and ATS strings from resources/noise_company_patterns.json."""
+    search_paths = [
+        Path("resources/noise_company_patterns.json"),
+        Path(__file__).resolve().parents[2] / "resources" / "noise_company_patterns.json",
+    ]
+    for p in search_paths:
+        if p.exists():
+            try:
+                return set(json.loads(p.read_text(encoding="utf-8")))
+            except Exception as e:
+                log.debug("Could not load noise_company_patterns.json: %s", e)
+    return {
+        "linkedin", "h linkedin", "stepstone", "indeed", "join.com", "bamboohr",
+        "personio", "greenhouse", "workday", "lever", "smartrecruiters", "softgarden",
+        "dvinci", "recruitee", "ashby", "recruiting", "karriere", "bewerbung", "candidate",
+    }
+
+NOISE_COMPANY_PATTERNS: Set[str] = _load_noise_patterns()
 
 # Legal company forms and geographic entity suffixes to strip
 LEGAL_FORM_REGEX = re.compile(
@@ -147,9 +126,17 @@ def is_noise_company(company: Optional[str]) -> bool:
     if "@" in clean:
         return True
 
-    if clean.endswith(".com") or clean.endswith(".de"):
-        if any(ats in clean for ats in ["bamboohr", "join", "personio", "greenhouse", "workday", "lever", "recruitee"]):
-            return True
+    if "." in clean:
+        try:
+            from src.core.channel_extractor import extract_channel_from_domain, CONSUMER_DOMAINS
+            clean_dom = clean.strip().lower()
+            if clean_dom in CONSUMER_DOMAINS:
+                return True
+            ats_channel = extract_channel_from_domain(clean_dom)
+            if ats_channel and ats_channel.lower() in NOISE_COMPANY_PATTERNS:
+                return True
+        except Exception:
+            pass
 
     if clean.startswith("h linkedin") or clean == "linkedin" or "linkedin" in clean.split():
         return True

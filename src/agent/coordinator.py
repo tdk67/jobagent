@@ -15,18 +15,26 @@ from src.core.storage import JobAgentStorage
 from src.tools.email_ingest_tool import EmailIngestEngine
 from src.tools.job_archive_tool import JobArchiveEngine
 from src.tools.report_render_tool import ReportRenderEngine
+from src.utils.prompt_loader import load_prompt
 
 log = logging.getLogger(__name__)
 
 
-SYSTEM_PROMPT = """You are JobAgent, an autonomous background career agent built with the AWS Strands Agents SDK.
+def _load_system_prompt() -> str:
+    try:
+        return load_prompt("coordinator_system.txt")
+    except Exception:
+        return """You are JobAgent, an autonomous background career agent built with the AWS Strands Agents SDK.
 Your mission is to remove the busywork, stress, and repetitive paperwork from the candidate's career search:
 1. Ingest and classify emails across connected inboxes (applications, rejections, genuine interview invitations).
 2. Filter out webinars, sales pitches, and deceptive marketing meetings.
 3. Preserve dual-asset archives of job postings (clean Markdown + high-res PDF snapshots).
 4. Maintain statutory proof tables for government employment compliance (e.g. German Agentur für Arbeit).
-5. Only interrupt or escalate to the human candidate when an explicit decision or action is required (such as selecting an interview slot).
+5. Only interrupt or escalate to the human candidate when an explicit decision or action is required.
 """
+
+
+SYSTEM_PROMPT = _load_system_prompt()
 
 
 class JobAgentCoordinator:
@@ -120,7 +128,40 @@ class JobAgentCoordinator:
             interviews = self.storage.list_interviews()
             return json.dumps({"statistics": stats, "interviews": interviews}, indent=2)
 
-        return [tool_ingest_emails, tool_generate_compliance_report, tool_archive_job_posting, tool_get_pipeline_statistics]
+        @tool(name="ask_human_for_approval", description="Requests explicit human confirmation for sensitive or high-impact decisions.")
+        def tool_ask_human_for_approval(
+            question: str,
+            context: str = "",
+            urgency: str = "normal",
+        ) -> str:
+            """Pauses or registers a pending human approval request on the candidate dashboard.
+
+            Parameters:
+                question: The specific question or confirmation required from the human candidate.
+                context: Background information, company name, meeting times, or action proposal.
+                urgency: Priority level ('normal', 'high', 'urgent').
+
+            Returns:
+                JSON string with the registered approval request ID and status.
+            """
+            approval_id = self.storage.create_pending_approval(
+                question=question,
+                context=context,
+                urgency=urgency,
+            )
+            return json.dumps({
+                "approval_id": approval_id,
+                "status": "pending_human_review",
+                "message": f"Approval request #{approval_id} registered on candidate dashboard."
+            }, indent=2)
+
+        return [
+            tool_ingest_emails,
+            tool_generate_compliance_report,
+            tool_archive_job_posting,
+            tool_get_pipeline_statistics,
+            tool_ask_human_for_approval,
+        ]
 
     def _init_strands_agent(self) -> Agent:
         """Initializes the Strands Agent with session-bound tools and configured model provider.
@@ -186,6 +227,10 @@ class JobAgentCoordinator:
 
     def run_autonomous_cycle(self, email_limit: int = 50) -> Dict[str, Any]:
         """Executes an autonomous background cycle: Agent reasons, invokes tools, and briefs candidate."""
+        import time
+        cycle_id = f"cycle_{int(time.time())}"
+        self.storage.record_agent_cycle(cycle_id=cycle_id, status="running")
+
         self.latest_triage = {}
         self.latest_reports = {}
         agent_briefing: Optional[str] = None
@@ -236,7 +281,16 @@ class JobAgentCoordinator:
         actionable_alerts = self.latest_triage.get("actionable_alerts", [])
         requires_human_attention = len(actionable_alerts) > 0
 
+        # Persist final cycle state
+        self.storage.record_agent_cycle(
+            cycle_id=cycle_id,
+            status="completed",
+            triage_result=self.latest_triage,
+            reports_result=self.latest_reports,
+        )
+
         return {
+            "cycle_id": cycle_id,
             "timestamp": self.latest_triage.get("timestamp"),
             "agent_ok": agent_ok,
             "triage_summary": self.latest_triage,

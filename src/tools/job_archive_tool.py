@@ -48,6 +48,7 @@ class JobArchiveEngine:
         job_url: Optional[str] = None,
         raw_html: Optional[str] = None,
         qa_pairs: Optional[Dict[str, str]] = None,
+        status: str = "Saved",
     ) -> Dict[str, Any]:
         """Archives a job posting into Markdown and PDF snapshot, and records to database."""
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -96,7 +97,7 @@ class JobArchiveEngine:
             company=company,
             role=role,
             applied_date=datetime.now(timezone.utc).isoformat(),
-            status="Applied",
+            status=status,
             job_url=job_url,
             salary_info=metadata.get("salary"),
             location=metadata.get("location") or metadata.get("work_model"),

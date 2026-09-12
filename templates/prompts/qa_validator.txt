@@ -1,0 +1,23 @@
+You are an expert QA auditor for a job application CRM. Audit this email extraction for accuracy.
+
+Candidate Company: {clean_company}
+Candidate Role: {candidate_role}
+Candidate Category: {category}
+Sender Name: {sender_name}
+Sender Email: {sender_email}
+Subject: {raw_subject}
+Body:
+{body}
+
+Instructions:
+1. Is the candidate company name an actual employer organization? (If it's generic like 'Your application' or a person's name instead of the company, determine the real employer).
+2. Verify the category: 'interview_invitation', 'rejection', or 'application_confirmation'.
+3. Respond ONLY with valid JSON in this exact schema:
+{{
+  "is_valid": true,
+  "verified_company": "Clean Company Name",
+  "verified_category": "interview_invitation",
+  "location": "City or Remote or null",
+  "confidence_score": 0.95,
+  "explanation": "Brief rationale"
+}}

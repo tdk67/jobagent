@@ -444,9 +444,13 @@ class GmailMcpAdapter(BaseEmailAdapter):
 
             for msg in emails_data:
                 raw_from = msg.get("from", "")
-                s_name, s_email = email.utils.parseaddr(raw_from)
-                sender_name = s_name if s_name else (s_email or raw_from)
-                sender_email = s_email if s_email else raw_from
+                if isinstance(raw_from, dict):
+                    sender_name = raw_from.get("name") or raw_from.get("email", "")
+                    sender_email = raw_from.get("email", "")
+                else:
+                    s_name, s_email = email.utils.parseaddr(str(raw_from))
+                    sender_name = s_name if s_name else (s_email or str(raw_from))
+                    sender_email = s_email if s_email else str(raw_from)
 
                 records.append(
                     EmailRecord(

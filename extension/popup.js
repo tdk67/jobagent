@@ -364,8 +364,11 @@ document.addEventListener("DOMContentLoaded", async () => {
           if (res.filledCount > 0) {
             resultBox.textContent = `✅ Filled ${res.filledCount} field${res.filledCount > 1 ? "s" : ""} (${res.method})!`;
             resultBox.className = "result-box";
+          } else if (res.totalFields > 0) {
+            resultBox.textContent = `ℹ️ Detected ${res.totalFields} fields (no profile matches; passwords skipped).`;
+            resultBox.className = "result-box";
           } else {
-            resultBox.textContent = `ℹ️ Detected ${res.totalFields || 0} fields (no profile matches; passwords skipped).`;
+            resultBox.textContent = `ℹ️ No form fields detected on this page/modal.`;
             resultBox.className = "result-box";
           }
         } else {

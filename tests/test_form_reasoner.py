@@ -503,3 +503,31 @@ def test_form_reasoner_country_options_avoid_false_substring_matches(temp_db: Jo
     assert res["mappings"]["f_country"] == "DE"
 
 
+def test_form_reasoner_easy_apply_fields(temp_db: JobAgentStorage):
+    profile = CandidateProfile(
+        personal=PersonalInfo(
+            fullName="Max Mustermann",
+            email="max@example.com",
+            headline="Senior Backend Engineer | Cloud Architect",
+            summaryDe="Erfahrener Softwareentwickler mit Fokus auf verteilte Systeme.",
+            coverLetterDe="Sehr geehrte Damen und Herren, hiermit bewerbe ich mich...",
+        ),
+        preferences=Preferences(targetRoles=["Senior Backend Engineer"]),
+    )
+    reasoner = FormReasoner(storage=temp_db, profile=profile)
+
+    fields = [
+        {"fieldId": "f_headline", "label": "Headline", "type": "text"},
+        {"fieldId": "f_summary", "label": "Summary*", "type": "textarea"},
+        {"fieldId": "f_cover_letter", "label": "Cover letter", "type": "textarea"},
+    ]
+
+    res = reasoner.reason_form(fields)
+    mappings = res["mappings"]
+
+    assert mappings["f_headline"] == "Senior Backend Engineer | Cloud Architect"
+    assert "Erfahrener Softwareentwickler" in mappings["f_summary"]
+    assert "Sehr geehrte Damen und Herren" in mappings["f_cover_letter"]
+
+
+

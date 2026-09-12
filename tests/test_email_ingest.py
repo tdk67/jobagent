@@ -448,3 +448,52 @@ def test_gmail_dead_adapter_not_appended(monkeypatch: pytest.MonkeyPatch, tmp_pa
         "Gmail ingestion enabled in config but no MCP client is wired" in " ".join(map(str, a))
         for a in captured
     )
+
+
+@pytest.mark.anyio
+async def test_email_ingest_scheduler(tmp_path: Path):
+    from src.tools.email.scheduler import EmailIngestScheduler
+
+    db_path = tmp_path / "sched_test.db"
+    storage = JobAgentStorage(db_path=str(db_path))
+
+    adapter = MockEmailAdapter([
+        {
+            "entry_id": "test_msg_1",
+            "sender_name": "Test HR",
+            "sender_email": "hr@test.de",
+            "subject": "Eingangsbestätigung: Bewerbung",
+            "received_time": "2026-09-12T12:00:00Z",
+            "body": "Vielen Dank für Ihre Bewerbung!",
+        }
+    ])
+    engine = EmailIngestEngine(storage=storage, adapters=[adapter])
+    scheduler = EmailIngestScheduler(engine=engine, storage=storage, interval_minutes=20, enabled=True)
+
+    status = scheduler.get_status()
+    assert status["enabled"] is True
+    assert status["interval_minutes"] == 20
+    assert status["last_status"] == "idle"
+    assert status["run_count"] == 0
+    assert status["next_run_time"] is not None
+
+    # Update config
+    status2 = scheduler.update_config(enabled=False, interval_minutes=30)
+    assert status2["enabled"] is False
+    assert status2["interval_minutes"] == 30
+    assert status2["next_run_time"] is None
+
+    # Re-enable
+    scheduler.update_config(enabled=True)
+
+    # Run once
+    res = await scheduler.run_once()
+    assert "total_scanned" in res
+    assert res["total_scanned"] == 1
+
+    status3 = scheduler.get_status()
+    assert status3["run_count"] == 1
+    assert status3["last_status"] == "success"
+    assert status3["last_run_time"] is not None
+    assert status3["next_run_time"] is not None
+

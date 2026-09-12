@@ -1,6 +1,7 @@
 """Tests for A2A Interface, FastAPI Gateway, and FastMCP Server."""
 
 from pathlib import Path
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from src.a2a.server import create_a2a_app
@@ -258,4 +259,60 @@ def test_mcp_server_tools_registered():
     assert "jobagent_get_interviews" in tool_names
     assert "jobagent_generate_compliance_report" in tool_names
     assert "jobagent_query_qa_memory" in tool_names
+
+
+def test_triage_and_email_endpoints(tmp_path: Path):
+    app, storage, profile, token = _make_f3_app(tmp_path)
+    # Save a test raw email
+    storage.save_raw_email(
+        entry_id="test_entry_123",
+        folder="Bewerbung",
+        sender_name="Acme Recruiting",
+        sender_email="jobs@acme.corp",
+        subject="Interview Invitation",
+        body="We are pleased to invite you to an interview.",
+        preview="We are pleased to invite you",
+        received_time="2026-09-12T10:00:00Z",
+    )
+
+    client = TestClient(app, base_url="http://127.0.0.1:8765", client=("127.0.0.1", 50001))
+
+    # 1. Triage Status
+    res_status = client.get("/api/v1/triage/status")
+    assert res_status.status_code == 200
+    data = res_status.json()
+    assert "enabled" in data
+    assert "interval_minutes" in data
+    assert "last_status" in data
+
+    # 2. Triage Config
+    res_cfg = client.post("/api/v1/triage/config", json={"interval_minutes": 30, "enabled": True})
+    assert res_cfg.status_code == 200
+    assert res_cfg.json()["interval_minutes"] == 30
+
+    # 3. Triage Run (mocked to prevent touching live Outlook/MCP during test)
+    with patch.object(
+        app.state.email_scheduler.engine,
+        "run_triage",
+        return_value={"total_scanned": 1, "interviews_found": 0, "rejections_found": 0},
+    ):
+        res_run = client.post("/api/v1/triage/run")
+        assert res_run.status_code == 200
+        assert res_run.json()["total_scanned"] == 1
+
+    # 4. Email Details
+    res_email = client.get("/api/v1/emails/test_entry_123")
+    assert res_email.status_code == 200
+    assert res_email.json()["subject"] == "Interview Invitation"
+    assert "We are pleased" in res_email.json()["body"]
+
+    # 4b. Non-existent email -> 404
+    res_not_found = client.get("/api/v1/emails/non_existent_999")
+    assert res_not_found.status_code == 404
+
+    # 5. Email Open endpoint
+    res_open = client.post("/api/v1/emails/test_entry_123/open")
+    assert res_open.status_code == 200
+    assert "status" in res_open.json()
+
 

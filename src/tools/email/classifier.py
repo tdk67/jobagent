@@ -282,76 +282,85 @@ class EmailClassifier:
         """Calls Gemini LLM for zero-shot semantic analysis on ambiguous emails."""
         try:
             from src.core.llm_provider import call_gemini_semantic_analysis
+            from src.utils.prompt_loader import load_prompt
         except ImportError:
             return None
 
-        prompt = (
-            "You are an expert recruitment and HR email triage assistant.\n"
-            "Classify the following email into exactly one of these categories:\n"
-            "- interview_invitation (genuine job interview, screening call, technical discussion)\n"
-            "- application_confirmation (acknowledgment that application was received)\n"
-            "- rejection (candidate not selected or application closed)\n"
-            "- follow_up (request for documents, recruiter scheduling inquiry, status update)\n"
-            "- noise (marketing, sales pitches, webinars, sponsored newsletters)\n\n"
-            "Also extract: matched_company (hiring company), matched_role (job title), "
-            "meeting_link (Teams/Zoom/Meet/Calendly link), suggested_date (interview date/time if mentioned).\n\n"
-            f"Sender: {sender_name} <{sender_email}>\n"
-            f"Subject: {subject}\n"
-            f"Body:\n{body[:2500]}\n\n"
-            "Return ONLY a JSON object with this structure:\n"
-            "{\n"
-            '  "category": "interview_invitation" | "application_confirmation" | "rejection" | "follow_up" | "noise",\n'
-            '  "confidence": 0.95,\n'
-            '  "matched_company": "Company Name or null",\n'
-            '  "matched_role": "Role or null",\n'
-            '  "meeting_link": "URL or null",\n'
-            '  "suggested_date": "Date string or null",\n'
-            '  "explanation": "Brief reasoning"\n'
-            "}"
-        )
+        try:
+            prompt_template = load_prompt("email_classifier.txt")
+            prompt = prompt_template.format(
+                sender_name=sender_name or "",
+                sender_email=sender_email or "",
+                subject=subject,
+                body=body[:2500],
+            )
+        except Exception as e:
+            log.debug("Prompt loading fallback: %s", e)
+            prompt = (
+                "You are an expert recruitment and HR email triage assistant.\n"
+                "Classify the following email into exactly one of these categories:\n"
+                "- interview_invitation, application_confirmation, rejection, follow_up, noise\n\n"
+                f"Sender: {sender_name} <{sender_email}>\n"
+                f"Subject: {subject}\n"
+                f"Body:\n{body[:2500]}\n\n"
+                "Return ONLY a JSON object with category, confidence, matched_company, matched_role, meeting_link, suggested_date, explanation."
+            )
 
         res_text = call_gemini_semantic_analysis(prompt)
         if not res_text:
             return None
 
-        try:
-            cleaned_json = res_text.strip()
-            if "```json" in cleaned_json:
-                cleaned_json = cleaned_json.split("```json")[1].split("```")[0].strip()
-            elif "```" in cleaned_json:
-                cleaned_json = cleaned_json.split("```")[1].split("```")[0].strip()
+        for attempt in range(2):
+            try:
+                cleaned_json = res_text.strip()
+                if "```json" in cleaned_json:
+                    cleaned_json = cleaned_json.split("```json")[1].split("```")[0].strip()
+                elif "```" in cleaned_json:
+                    cleaned_json = cleaned_json.split("```")[1].split("```")[0].strip()
 
-            parsed = json.loads(cleaned_json)
-            category = parsed.get("category", "noise")
-            if category not in {"interview_invitation", "application_confirmation", "rejection", "follow_up", "noise"}:
-                return None
+                parsed = json.loads(cleaned_json)
+                category = parsed.get("category", "noise")
+                if category not in {"interview_invitation", "application_confirmation", "rejection", "follow_up", "noise"}:
+                    return None
 
-            validated_link = self.extract_meeting_link(parsed.get("meeting_link") or "")
-            extracted_comp = parsed.get("matched_company") or None
-            expl = parsed.get("explanation", "Classified via Gemini LLM")
+                validated_link = self.extract_meeting_link(parsed.get("meeting_link") or "")
+                extracted_comp = parsed.get("matched_company") or None
+                expl = parsed.get("explanation", "Classified via Gemini LLM")
 
-            # Anti-Phishing: verify company authenticity for interview invitations
-            if category == "interview_invitation":
-                verified_comp = self.find_matching_company(f"{subject}\n{body}", sender_name, sender_email)
-                if not verified_comp:
-                    category = "follow_up"
-                    expl = "Unverified sender claiming interview; downgraded to follow_up for safety"
-                    extracted_comp = None
-                else:
-                    extracted_comp = verified_comp
+                # Anti-Phishing: verify company authenticity for interview invitations
+                if category == "interview_invitation":
+                    verified_comp = self.find_matching_company(f"{subject}\n{body}", sender_name, sender_email)
+                    if not verified_comp:
+                        category = "follow_up"
+                        expl = "Unverified sender claiming interview; downgraded to follow_up for safety"
+                        extracted_comp = None
+                    else:
+                        extracted_comp = verified_comp
 
-            return ClassificationResult(
-                category=category,
-                confidence=float(parsed.get("confidence", 0.85)),
-                matched_company=extracted_comp,
-                matched_role=parsed.get("matched_role") or None,
-                meeting_link=validated_link,
-                suggested_date=parsed.get("suggested_date") or None,
-                explanation=expl,
-            )
-        except Exception as e:
-            log.warning("Failed to parse Gemini LLM classification response: %s", e, exc_info=True)
-            return None
+                return ClassificationResult(
+                    category=category,
+                    confidence=float(parsed.get("confidence", 0.85)),
+                    matched_company=extracted_comp,
+                    matched_role=parsed.get("matched_role") or None,
+                    meeting_link=validated_link,
+                    suggested_date=parsed.get("suggested_date") or None,
+                    explanation=expl,
+                )
+            except Exception as e:
+                log.warning("Attempt %d: Failed to parse Gemini LLM classification response: %s", attempt + 1, e)
+                if attempt == 0:
+                    retry_prompt = (
+                        f"{prompt}\n\n"
+                        f"[SELF-CORRECTION REQUIRED]\n"
+                        f"Your previous response could not be parsed as JSON ({e}).\n"
+                        f"Previous raw output: {res_text[:400]}\n"
+                        f"Please output strictly valid JSON matching the requested structure."
+                    )
+                    res_text = call_gemini_semantic_analysis(retry_prompt)
+                    if not res_text:
+                        break
+
+        return None
 
     def classify(
         self,
