@@ -136,7 +136,7 @@ def create_a2a_app(
                 log.warning("Could not persist token to .jobagent_token: %s", e)
 
     log.info("JobAgent API Token: %s", active_token)
-    print(f"\n🔑 JobAgent API Token: {active_token}")
+    print(f"\n[JobAgent] API Token: {active_token}")
     print(f"   (Persisted in .jobagent_token for browser extension & CLI)\n")
 
     def verify_token(
@@ -383,7 +383,13 @@ def create_a2a_app(
     # 3b. Interactive / Visual Web Dashboard (P1 fix: clean URL, zero credentials in URL)
     @app.get("/dashboard", response_class=HTMLResponse)
     async def get_dashboard() -> HTMLResponse:
-        """Renders live HTML dashboard with current database metrics."""
+        """Renders live HTML dashboard for local single-user inspection.
+        
+        Security Model:
+        - Strictly protected by validate_host_header middleware (Host: loopback/localhost only).
+        - Bound to local loopback interface (127.0.0.1) so remote network actors cannot reach it.
+        - Avoids embedding tokens in browser query params (?token=...) or browsing history.
+        """
         res = report_engine.generate(view_type="dashboard", export_pdf=False)
         html_file = Path(res["html_path"])
         html_content = html_file.read_text(encoding="utf-8")

@@ -71,6 +71,7 @@ class CandidateProfile(BaseModel):
     technical_skills: TechnicalSkills = Field(default_factory=TechnicalSkills)
     preferences: Preferences = Field(default_factory=Preferences)
     documents: DocumentPaths = Field(default_factory=DocumentPaths)
+    languages: Dict[str, str] = Field(default_factory=dict)
     common_answers: Dict[str, str] = Field(default_factory=dict)
     work_experience: List[Dict[str, Any]] = Field(default_factory=list)
     education: List[Dict[str, Any]] = Field(default_factory=list)
@@ -132,6 +133,16 @@ def load_profile(
             "core": list(data["skills"].keys()),
             "yearsExperience": data["skills"],
         }
+
+    # Map preferences from jobSearch
+    pref_dict = data.get("preferences", {})
+    if job_search and "preferredLocations" in job_search and not pref_dict.get("locations"):
+        pref_dict["locations"] = job_search["preferredLocations"]
+    data["preferences"] = pref_dict
+
+    # Map languages
+    if "languages" in data and "languages" not in data:
+        data["languages"] = data["languages"]
 
     # Consolidate QA memory strictly from profile (single source of truth)
     common_answers = data.get("common_answers", {})

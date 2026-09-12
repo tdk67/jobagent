@@ -305,7 +305,10 @@ def cmd_daemon(cfg: Any, interval_minutes: int = 30) -> None:
             print(f"\n[Cycle #{cycle_count} @ {now_str}] Running autonomous cycle...")
             try:
                 res = coordinator.run_autonomous_cycle()
-                print(json.dumps(res, indent=2))
+                log.debug("Autonomous cycle completed: %s", res)
+                apps_cnt = res.get("applications_found", 0) if isinstance(res, dict) else 0
+                alerts_cnt = len(res.get("actionable_alerts", [])) if isinstance(res, dict) else 0
+                print(f"✓ Cycle completed cleanly ({apps_cnt} applications checked, {alerts_cnt} alerts).")
             except Exception as err:
                 print(f"⚠ Autonomous cycle encountered an error: {err}")
             cycle_count += 1

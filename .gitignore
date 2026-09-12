@@ -21,7 +21,7 @@ answered_*.json
 !.env.example
 
 # Local Application Data & Outputs
-data/
+/data/
 output/
 storage/
 *.log

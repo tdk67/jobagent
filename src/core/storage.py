@@ -17,8 +17,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from src.core.migrations import run_migrations
-from src.tools.email.normalizer import is_noise_company, normalize_company_name, normalize_role_title
-from src.tools.role_extractor import extract_role_from_context
+from src.core.normalizer import is_noise_company, normalize_company_name, normalize_role_title
+from src.core.role_extractor import extract_role_from_context
 from src.utils.date_utils import parse_flexible_date
 
 log = logging.getLogger(__name__)
@@ -82,20 +82,30 @@ class JobAgentStorage:
             )
             rows = cursor.fetchall()
 
-            # 2. Fuzzy match stripping legal forms or prefix variants (e.g. "Ratbacher GmbH" vs "Ratbacher")
-            if not rows:
-                cursor.execute(
-                    "SELECT id, company, role, status, applied_date FROM applications WHERE LOWER(company) LIKE ? OR LOWER(?) LIKE LOWER(company) || '%'",
-                    (f"{canon_company.lower()}%", canon_company.lower()),
-                )
-                rows = cursor.fetchall()
-
+            target_row = None
             if rows:
-                row = rows[0]
-                app_id = row["id"]
-                existing_role = row["role"]
-                existing_status = row["status"]
-                existing_applied_date = row["applied_date"]
+                if cleaned_role:
+                    # Look for exact or normalized role match
+                    for r in rows:
+                        ex_cleaned = normalize_role_title(r["role"])
+                        if ex_cleaned and ex_cleaned.lower() == cleaned_role.lower():
+                            target_row = r
+                            break
+                    # If no exact role match, look for an entry with an unparsed/placeholder role to upgrade
+                    if target_row is None:
+                        for r in rows:
+                            if not normalize_role_title(r["role"]):
+                                target_row = r
+                                break
+                else:
+                    # Incoming role is placeholder/empty -> link to most recent application for this company
+                    target_row = rows[0]
+
+            if target_row:
+                app_id = target_row["id"]
+                existing_role = target_row["role"]
+                existing_status = target_row["status"]
+                existing_applied_date = target_row["applied_date"]
 
                 # Upgrade role if existing is placeholder and new is concrete
                 new_role = existing_role
@@ -140,7 +150,7 @@ class JobAgentStorage:
 
     def deduplicate_applications(self) -> Dict[str, int]:
         """Cleans existing applications in the database by merging duplicate companies,
-        upgrading placeholder roles, removing noise entities, and re-linking foreign keys.
+        preserving distinct roles at the same company, and purging aggregator noise.
         """
         from collections import defaultdict
 
@@ -160,17 +170,38 @@ class JobAgentStorage:
                     cursor.execute("DELETE FROM applications WHERE id = ?", (app_id,))
                     deleted_noise_count += 1
 
-            # 2. Re-query surviving applications
+            # 2. Re-query surviving applications and group by company
             apps = cursor.execute("SELECT * FROM applications").fetchall()
             by_canon = defaultdict(list)
             for app in apps:
                 canon = normalize_company_name(app["company"]) or app["company"].strip()
                 by_canon[canon.lower()].append((canon, app))
 
-            # 3. Merge duplicate clusters
+            # 3. Sub-cluster by (company, concrete_role) to keep distinct positions separate
+            clusters = []
             for canon_lower, group in by_canon.items():
-                if len(group) == 1:
-                    canon_name, app = group[0]
+                canon_name = group[0][0]
+                by_role = defaultdict(list)
+                placeholders = []
+                for _, app in group:
+                    r_clean = normalize_role_title(app["role"])
+                    if r_clean:
+                        by_role[r_clean.lower()].append(app)
+                    else:
+                        placeholders.append(app)
+
+                if by_role:
+                    role_keys = list(by_role.keys())
+                    by_role[role_keys[0]].extend(placeholders)
+                    for _, r_records in by_role.items():
+                        clusters.append((canon_name, r_records))
+                else:
+                    clusters.append((canon_name, [g[1] for g in group]))
+
+            # 4. Merge duplicate clusters
+            for canon_name, records in clusters:
+                if len(records) == 1:
+                    app = records[0]
                     clean_role = normalize_role_title(app["role"]) or app["role"]
                     if app["company"] != canon_name or app["role"] != clean_role:
                         cursor.execute(
@@ -178,9 +209,6 @@ class JobAgentStorage:
                             (canon_name, clean_role, app["id"]),
                         )
                     continue
-
-                records = [g[1] for g in group]
-                canon_name = group[0][0]
 
                 def rank_record(r):
                     has_real_role = 1 if normalize_role_title(r["role"]) else 0
@@ -312,22 +340,29 @@ class JobAgentStorage:
 
 
     def get_application_by_company(self, company: str) -> Optional[Dict[str, Any]]:
-        """Finds application by company name (case-insensitive substring match with normalization)."""
+        """Finds application by company name with canonical normalization."""
         canon = normalize_company_name(company) or company.strip()
         comp = canon.lower()
         raw_comp = company.strip().lower()
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
+                "SELECT * FROM applications WHERE LOWER(company) = ? OR LOWER(company) = ? ORDER BY applied_date DESC LIMIT 1",
+                (comp, raw_comp),
+            )
+            row = cursor.fetchone()
+            if row:
+                return dict(row)
+
+            cursor.execute(
                 """
                 SELECT * FROM applications 
-                WHERE LOWER(company) = ? 
-                   OR LOWER(company) LIKE ? 
+                WHERE LOWER(company) LIKE ? 
                    OR LOWER(?) LIKE LOWER(company) || '%'
                    OR ? LIKE '%' || LOWER(company) || '%'
                 ORDER BY applied_date DESC LIMIT 1
                 """,
-                (comp, f"%{comp}%", raw_comp, raw_comp),
+                (f"%{comp}%", raw_comp, raw_comp),
             )
             row = cursor.fetchone()
             return dict(row) if row else None

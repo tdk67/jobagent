@@ -46,12 +46,15 @@ def call_gemini_semantic_analysis(
     temperature: Optional[float] = None,
     config: Optional[AppConfig] = None,
     api_key: Optional[str] = None,
+    raise_on_error: bool = False,
 ) -> str:
     """Synchronous helper for zero-shot email triage and form field semantic reasoning."""
     from google import genai
 
     key = api_key or os.getenv("GEMINI_API_KEY")
     if not key:
+        if raise_on_error:
+            raise ValueError("GEMINI_API_KEY is not set in environment (.env).")
         log.debug("GEMINI_API_KEY not set; skipping LLM semantic analysis")
         return ""
 
@@ -70,4 +73,6 @@ def call_gemini_semantic_analysis(
         return res.text or ""
     except Exception as e:
         log.warning("Gemini semantic analysis call failed (model=%s): %s", target_model, e, exc_info=True)
+        if raise_on_error:
+            raise
         return ""

@@ -1,11 +1,18 @@
-"""Unit and integration tests for Cover Letter Generation Engine (DIN 5008)."""
+"""Unit and integration tests for Cover Letter Generation Engine (DIN 5008).
+
+Verifies fail-loud error reporting (no silent generic boilerplate fallbacks)
+and secure DIN 5008 PDF rendering.
+"""
 
 from pathlib import Path
+from unittest.mock import patch
+import pytest
+
 from src.core.profile import CandidateProfile, PersonalInfo, DocumentPaths
-from src.tools.cover_letter_tool import CoverLetterEngine
+from src.tools.cover_letter_tool import CoverLetterEngine, CoverLetterGenerationError
 
 
-def test_cover_letter_generation_german_and_english(tmp_path: Path):
+def test_cover_letter_generation_with_body_text(tmp_path: Path):
     out_dir = tmp_path / "cover_letters"
     engine = CoverLetterEngine(output_dir=out_dir)
 
@@ -25,12 +32,19 @@ def test_cover_letter_generation_german_and_english(tmp_path: Path):
         ),
     )
 
-    # 1. German Cover Letter
+    custom_de_body = (
+        "Sehr geehrte Damen und Herren,\n\n"
+        "mit über 8 Jahren Erfahrung in verteilten Systemen und Cloud-Architekturen bewerbe ich mich für die Position "
+        "als Senior Java / Cloud Engineer bei Capgemini.\n\n"
+        "In meiner bisherigen Laufbahn habe ich hochverfügbare Microservice-Plattformen skaliert und Teams technisch geleitet."
+    )
+
+    # 1. German Cover Letter with tailored body
     res_de = engine.generate(
         company="Capgemini",
         role="Senior Java / Cloud Engineer",
         lang="de",
-        use_gemini=False,  # deterministic template test
+        body_text=custom_de_body,
         profile=prof,
     )
 
@@ -45,15 +59,25 @@ def test_cover_letter_generation_german_and_english(tmp_path: Path):
     assert "Bewerbung als Senior Java / Cloud Engineer" in html_de_content
     assert "Mit freundlichen Grüßen," in html_de_content
     assert "Musterstrasse 1" in html_de_content
+    assert "über 8 Jahren Erfahrung in verteilten Systemen" in html_de_content
 
-    # 2. English Cover Letter
-    res_en = engine.generate(
-        company="Ericsson",
-        role="Principal Backend Engineer",
-        lang="en",
-        use_gemini=False,
-        profile=prof,
+    # 2. English Cover Letter with mocked Gemini generation
+    mock_en_body = (
+        "Dear Hiring Team,\n\n"
+        "I am writing to express my strong interest in the Principal Backend Engineer role at Ericsson. "
+        "With a proven track record in high-throughput distributed architectures, I have led backend initiatives "
+        "powering millions of transactions daily."
     )
+
+    with patch("src.tools.cover_letter_tool.call_gemini_semantic_analysis", return_value=mock_en_body):
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key-mock"}):
+            res_en = engine.generate(
+                company="Ericsson",
+                role="Principal Backend Engineer",
+                lang="en",
+                use_gemini=True,
+                profile=prof,
+            )
 
     assert Path(res_en["html_path"]).exists()
     assert Path(res_en["pdf_path"]).exists()
@@ -65,6 +89,48 @@ def test_cover_letter_generation_german_and_english(tmp_path: Path):
     assert "Principal Backend Engineer" in html_en_content
     assert "Application for Principal Backend Engineer" in html_en_content
     assert "Sincerely," in html_en_content
+    assert "proven track record in high-throughput distributed architectures" in html_en_content
+
+
+def test_cover_letter_fails_loud_without_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    out_dir = tmp_path / "cover_letters_err"
+    engine = CoverLetterEngine(output_dir=out_dir)
+
+    prof = CandidateProfile(
+        personal=PersonalInfo(fullName="Jane Doe", email="jane@example.com")
+    )
+
+    # Ensure GEMINI_API_KEY is not set
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    with pytest.raises(CoverLetterGenerationError) as exc_info:
+        engine.generate(
+            company="Acme Corp",
+            role="Lead Engineer",
+            use_gemini=True,
+            profile=prof,
+        )
+
+    assert "GEMINI_API_KEY is not configured" in str(exc_info.value)
+
+
+def test_cover_letter_fails_loud_on_429_quota_limit(tmp_path: Path):
+    out_dir = tmp_path / "cover_letters_err2"
+    engine = CoverLetterEngine(output_dir=out_dir)
+    prof = CandidateProfile(personal=PersonalInfo(fullName="Jane Doe"))
+
+    with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}):
+        with patch("src.tools.cover_letter_tool.call_gemini_semantic_analysis", side_effect=Exception("HTTP 429 RESOURCE_EXHAUSTED Quota exceeded")):
+            with pytest.raises(CoverLetterGenerationError) as exc_info:
+                engine.generate(
+                    company="Acme Corp",
+                    role="Lead Engineer",
+                    use_gemini=True,
+                    profile=prof,
+                )
+
+            assert "429" in str(exc_info.value)
+            assert "quota exceeded or rate-limited" in str(exc_info.value)
 
 
 def test_cover_letter_html_injection_prevention(tmp_path: Path):
@@ -85,11 +151,13 @@ def test_cover_letter_html_injection_prevention(tmp_path: Path):
         ),
     )
 
+    safe_body = "Bewerbungstext ohne Skripte <script>alert('body')</script> mit Qualifikationen."
+
     res = engine.generate(
         company="EvilCorp <img src=x onerror=alert(2)>",
         role="Hacker & Lead <script>alert(3)</script>",
         lang="de",
-        use_gemini=False,
+        body_text=safe_body,
         profile=prof,
     )
 
@@ -101,4 +169,5 @@ def test_cover_letter_html_injection_prevention(tmp_path: Path):
     assert "<script>alert(3)</script>" not in html_content
     assert "&lt;script&gt;alert(3)&lt;/script&gt;" in html_content
     assert "Hacker &amp; Lead" in html_content
-
+    assert "<script>alert('body')</script>" not in html_content
+    assert "&lt;script&gt;alert(&#x27;body&#x27;)&lt;/script&gt;" in html_content

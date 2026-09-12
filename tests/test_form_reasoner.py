@@ -240,3 +240,104 @@ def test_form_reasoner_city_falls_back_to_postal_segment(temp_db: JobAgentStorag
 
     res = reasoner.reason_form([{"fieldId": "f_city", "label": "City", "type": "text"}])
     assert res["mappings"]["f_city"] == "Frankfurt am Main", res["mappings"]["f_city"]
+
+
+def test_form_reasoner_capgemini_edge_cases(temp_db: JobAgentStorage):
+    """Verifies resolution of language level (B2 not C1), standort (not street), and compliance dropdowns."""
+    profile = CandidateProfile(
+        personal=PersonalInfo(
+            fullName="Alex Example",
+            email="alex.example@example.com",
+            phone="+49 1511 000 0000",
+            street="Hauptstr. 10",
+            city="Darmstadt",
+            countryDe="Deutschland",
+            countryEn="Germany",
+            address="Hauptstr. 10, 64283 Darmstadt, Deutschland",
+        ),
+        preferences=Preferences(
+            locations=["Frankfurt", "Darmstadt"],
+        ),
+        languages={
+            "german": "B2 - selbstständige Sprachverwendung",
+            "english": "C1 - fachkundige Sprachkenntnisse",
+            "hungarian": "Muttersprache",
+        },
+    )
+    reasoner = FormReasoner(storage=temp_db, profile=profile)
+
+    fields = [
+        # 1. German language level: Must pick B2 option, NEVER C1/C2!
+        {
+            "fieldId": "f_german",
+            "label": "1. *Wie gut sind deine Deutschkenntnisse",
+            "type": "radio",
+            "options": [
+                {"value": "0", "text": "Keine - No Skills"},
+                {"value": "1", "text": "A1 - Grundkenntnisse"},
+                {"value": "2", "text": "A2 - Erweiterte Grundkenntnisse"},
+                {"value": "3", "text": "B1 - Gute Sprachkenntnisse"},
+                {"value": "4", "text": "B2 - Fließende Sprachkenntnisse"},
+                {"value": "5", "text": "C1 / C2 - Verhandlungssichere Sprachkenntnisse"},
+            ],
+        },
+        # 2. Location preference: Must pick target location (Frankfurt), NOT street address!
+        {
+            "fieldId": "f_standort",
+            "label": "2. *Für welchen Standort möchtest du dich primär bewerben?",
+            "type": "textarea",
+        },
+        # 3. Country of residence dropdown
+        {
+            "fieldId": "f_residence",
+            "label": "Land des aktuellen Wohnsitzes*",
+            "type": "select",
+            "options": [
+                {"value": "-1", "text": "Keine Auswahl"},
+                {"value": "DE", "text": "Deutschland"},
+                {"value": "FR", "text": "Frankreich"},
+            ],
+        },
+        # 4. Work authorization dropdown
+        {
+            "fieldId": "f_work_auth",
+            "label": "Hast du eine Arbeitserlaubnis in dem Land, in dem du dich bewirbst?*",
+            "type": "select",
+            "options": [
+                {"value": "", "text": "Keine Auswahl"},
+                {"value": "true", "text": "Ja"},
+                {"value": "false", "text": "Nein"},
+            ],
+        },
+        # 5. Prior employment dropdown
+        {
+            "fieldId": "f_prev_employed",
+            "label": "Warst du bereits bei der Capgemini Gruppe angestellt?*",
+            "type": "select",
+            "options": [
+                {"value": "", "text": "Keine Auswahl"},
+                {"value": "true", "text": "Ja"},
+                {"value": "false", "text": "Nein"},
+            ],
+        },
+    ]
+
+    res = reasoner.reason_form(fields)
+    mappings = res["mappings"]
+
+    # Assert German is B2 (value "4"), NOT C1/C2 (value "5")
+    assert mappings["f_german"] == "4"
+
+    # Assert Standort is Frankfurt, NOT street address
+    assert mappings["f_standort"] == "Frankfurt"
+    assert "Hauptstr" not in mappings["f_standort"]
+
+    # Assert Country of residence is DE
+    assert mappings["f_residence"] == "DE"
+
+    # Assert Work authorization is true (Ja)
+    assert mappings["f_work_auth"] == "true"
+
+    # Assert Prior employment is false (Nein)
+    assert mappings["f_prev_employed"] == "false"
+

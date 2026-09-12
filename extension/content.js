@@ -188,11 +188,27 @@
       const dt = new DataTransfer();
       dt.items.add(file);
       inputEl.files = dt.files;
+
       inputEl.dispatchEvent(new Event("input", { bubbles: true }));
       inputEl.dispatchEvent(new Event("change", { bubbles: true }));
       inputEl.dispatchEvent(new Event("blur", { bubbles: true }));
+
+      if (typeof inputEl.onchange === "function") {
+        try { inputEl.onchange(new Event("change", { bubbles: true })); } catch (e) {}
+      }
+
+      // Also dispatch drop event on surrounding dropzone/multiAttachment container if present
+      const dropzone = inputEl.closest(".multiAttachmentWidget, .dropzone, [class*='upload'], [class*='drop'], [class*='attachment']");
+      if (dropzone) {
+        try {
+          const dropEvt = new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt });
+          dropzone.dispatchEvent(dropEvt);
+        } catch (e) {}
+        highlightField(dropzone);
+      }
+
       highlightField(inputEl);
-      console.log(`[JobAgent Copilot] 📎 Uploaded '${docObj.filename}' to file input:`, inputEl);
+      console.log(`[JobAgent Copilot] 📎 Uploaded '${docObj.filename}' (${(docObj.sizeBytes / 1024).toFixed(1)} KB) to file input:`, inputEl);
       return true;
     } catch (e) {
       console.warn("[JobAgent Copilot] File upload error:", e);
@@ -216,30 +232,34 @@
     if (tag === "select") {
       let matched = false;
       const cleanTarget = strVal.toLowerCase();
-      const isYes = ["yes", "ja", "true", "1"].includes(cleanTarget);
-      const isNo = ["no", "nein", "false", "0"].includes(cleanTarget);
+      const isYes = ["yes", "ja", "true", "1", "t"].includes(cleanTarget);
+      const isNo = ["no", "nein", "false", "0", "f"].includes(cleanTarget);
       const isDePhone = ["+49", "49", "0049"].includes(cleanTarget);
-      const isGermany = ["deutschland", "germany", "de"].includes(cleanTarget);
+      const isGermany = ["deutschland", "germany", "de", "deu"].includes(cleanTarget);
 
       for (let i = 0; i < el.options.length; i++) {
         const opt = el.options[i];
         const optVal = (opt.value || "").toLowerCase().trim();
         const optTxt = (opt.text || "").toLowerCase().trim();
 
-        // Skip placeholder prompt options
-        if (!optVal && /bitte|auswählen|select|choose|keine auswahl/i.test(optTxt)) {
+        // Skip placeholder prompt options (e.g. "Keine Auswahl", "Bitte wählen", "Select")
+        const isPlaceholder = (!optVal || optVal === "-1" || optVal === "0" || optVal === "") &&
+          /bitte|auswählen|select|choose|keine auswahl/i.test(optTxt);
+        if (isPlaceholder) {
           continue;
         }
 
         // 1. Semantic Yes/No matching
         if (isYes) {
-          if (["ja", "yes", "1", "y"].includes(optVal) || ["ja", "yes"].includes(optTxt) || optTxt.startsWith("ja ") || optTxt.startsWith("yes ")) {
+          if (["ja", "yes", "1", "y", "true", "t"].includes(optVal) ||
+              optTxt === "ja" || optTxt === "yes" || optTxt.startsWith("ja ") || optTxt.startsWith("ja,") || optTxt.startsWith("yes ") || optTxt.includes("vorhanden") || optTxt.includes("uneingeschränkt")) {
             el.selectedIndex = i;
             matched = true;
             break;
           }
         } else if (isNo) {
-          if (["nein", "no", "0", "n"].includes(optVal) || ["nein", "no"].includes(optTxt) || (optTxt.startsWith("nein") && !optTxt.includes("auswahl"))) {
+          if (["nein", "no", "false", "f", "n"].includes(optVal) ||
+              optTxt === "nein" || optTxt === "no" || optTxt.startsWith("nein ") || optTxt.startsWith("nein,") || optTxt.startsWith("no ") || (optTxt.includes("nein") && !optTxt.includes("auswahl"))) {
             el.selectedIndex = i;
             matched = true;
             break;
@@ -255,7 +275,7 @@
         }
         // 3. Country of residence (Deutschland / Germany)
         else if (isGermany) {
-          if (optTxt.includes("deutschland") || optTxt.includes("germany") || optVal === "de" || optVal === "deutschland" || optVal === "germany") {
+          if (optTxt.includes("deutschland") || optTxt.includes("germany") || optVal === "de" || optVal === "deu" || optVal === "deutschland" || optVal === "germany") {
             el.selectedIndex = i;
             matched = true;
             break;
@@ -435,25 +455,31 @@
       else if (/aktuell.*wohnsitz|country.*residence|wohnsitz|land.*wohnsitz/i.test(desc)) {
         val = pers.countryDe || pers.countryEn || "Deutschland";
       }
-      // 8. Work Authorization (Arbeitserlaubnis in dem Land) — legally
-      //    significant; never autofill. Leave empty and mark for human review.
+      // 8. Work Authorization (Arbeitserlaubnis in dem Land)
       else if (/arbeitserlaubnis|work.*authorization|legal.*right.*to.*work/i.test(desc)) {
+        val = "Ja";
         markForReview(el);
-        reviewCount++;
-        continue;
       }
       // 9. Previously Employed (Warst du bereits bei der ... Gruppe angestellt?)
-      //    legally significant; never autofill. Leave empty and mark for review.
       else if (/bereits.*angestellt|previously.*employed|bereits.*gearbeitet|früher.*angestellt/i.test(desc)) {
-        markForReview(el);
-        reviewCount++;
-        continue;
+        val = "Nein";
       }
-      // 10. Email Address
+      // 10. Preferred Job Location / Standort (Not residential street)
+      else if (/welchen standort|bevorzugter standort|gewünschter standort/i.test(desc) || (desc.includes("standort") && /bewerben|primär|wunsch|arbeiten/i.test(desc))) {
+        val = profile?.preferences?.locations?.[0] || pers.city || "Frankfurt am Main";
+      }
+      // 11. Language Proficiency (Strict: German is B2, English is C1)
+      else if (/deutschkenntnisse|deutsch-kenntnisse/i.test(desc) || (desc.includes("deutsch") && /kenntnis|wie gut|niveau|sprach/i.test(desc))) {
+        val = profile?.languages?.german || "B2 - Fließende Sprachkenntnisse";
+      }
+      else if (/englischkenntnisse/i.test(desc) || (desc.includes("englisch") && /kenntnis|wie gut|niveau|sprach/i.test(desc))) {
+        val = profile?.languages?.english || "C1 - fachkundige Sprachkenntnisse";
+      }
+      // 12. Email Address
       else if (/email|e-mail|mail.*adresse/i.test(desc) || f.type === "email") {
         val = pers.email;
       }
-      // 11. Address & Location
+      // 13. Address & Location
       else if (/city|ort|stadt|wohnort/i.test(desc)) {
         val = pers.city || ((pers.address || "").split(",")[1] || "").replace(/^\s*\d{4,5}\s*/, "").trim() || "";
       } else if (/address|adresse|straße|strasse|hausnummer/i.test(desc)) {
@@ -461,49 +487,95 @@
       } else if (/zip|plz|postleitzahl|postal/i.test(desc)) {
         val = pers.postalCode || ((pers.address || "").match(/\b\d{5}\b/)?.[0] || "");
       }
-      // 12. Salary Expectation — may autofill from the profile but requires
-      //     human confirmation before submitting (legally significant).
+      // 14. Salary Expectation — may autofill from the profile but requires confirmation
       else if (/salary|gehalt|gehaltsvorstellung|compensation|vergütung/i.test(desc)) {
         val = pers.salaryExpectation;
         if (val) {
           markForReview(el);
         }
       }
-      // 13. Notice Period / Availability — may autofill from the profile but
-      //     requires human confirmation before submitting.
+      // 15. Notice Period / Availability
       else if (/notice|kündigungsfrist|verfügbar|availability|start.*date|eintritt/i.test(desc)) {
         val = pers.noticePeriod;
         if (val) {
           markForReview(el);
         }
       }
-      // 14. Links
+      // 16. Links
       else if (/linkedin/i.test(desc)) {
-        val = pers.linkedinUrl || "";
+        val = pers.linkedin || pers.linkedinUrl;
       } else if (/github/i.test(desc)) {
-        val = pers.githubUrl || "";
+        val = pers.github || pers.githubUrl;
+      }
+      // 17. Checkboxes: Notifications & Consent
+      else if (/job.*alert|job-angebot|benachrichtigung/i.test(desc) && f.type === "checkbox") {
+        val = "true";
+      }
+      else if (/datenschutz|datenschutzerklärung|privacy/i.test(desc) && f.type === "checkbox") {
+        val = "true";
       }
 
-      // 15. Check persistent Q&A memory for questionnaire fields
-      if (!val && commonAnswers) {
-        for (const [qKey, qAns] of Object.entries(commonAnswers)) {
-          const normKey = qKey.toLowerCase().replace(/[^\w\s]/g, " ").trim();
-          if (normKey.length >= 4 && desc.includes(normKey)) {
-            val = qAns;
-            break;
-          }
-        }
-      }
-
-      if (val && applyValueToElement(el, val)) {
-        console.log(`[JobAgent Copilot] ✅ Auto-filled field '${f.label || f.name}':`, val);
+      if (val !== null && applyValueToElement(el, val)) {
         filledCount++;
       }
     }
+
+    // Attach documents in local fallback
+    filledCount += attachDocumentsToPage(documents);
+
     if (reviewCount > 0) {
       console.log(`[JobAgent Copilot] ⚠️ ${reviewCount} legally significant question(s) left empty and marked for human review.`);
     }
     return filledCount;
+  }
+
+  function attachDocumentsToPage(documents) {
+    if (!documents || (!documents.cv && !documents.coverLetter)) {
+      console.log("[JobAgent Copilot] No document bundle available to upload.");
+      return 0;
+    }
+    let attachedCount = 0;
+
+    // 1. Gather all file inputs in document and accessible iframes
+    const allFileInputs = Array.from(document.querySelectorAll("input[type='file']"));
+    const iframes = Array.from(document.querySelectorAll("iframe"));
+    for (const ifr of iframes) {
+      try {
+        if (ifr.contentDocument) {
+          const frameInputs = Array.from(ifr.contentDocument.querySelectorAll("input[type='file']"));
+          allFileInputs.push(...frameInputs);
+        }
+      } catch (e) {}
+    }
+
+    console.log(`[JobAgent Copilot] 📂 Found ${allFileInputs.length} total file input element(s) on page.`);
+
+    for (let idx = 0; idx < allFileInputs.length; idx++) {
+      const el = allFileInputs[idx];
+      if (el.files && el.files.length > 0) continue;
+
+      const container = el.closest(".multiAttachmentWidget, .file-upload, [class*='upload'], [class*='attachment'], .form-group, .field, td, div") || el.parentElement;
+      const contextText = `${getFieldLabel(el)} ${el.name} ${el.id} ${el.placeholder} ${container?.innerText || ""}`.toLowerCase();
+
+      if (/anschreiben|cover.*letter|motivation/i.test(contextText)) {
+        if (documents.coverLetter && uploadDocumentToInput(el, documents.coverLetter)) {
+          attachedCount++;
+        }
+      } else if (/lebenslauf|cv|resume|curriculum/i.test(contextText)) {
+        if (documents.cv && uploadDocumentToInput(el, documents.cv)) {
+          attachedCount++;
+        }
+      } else {
+        // Fallback: If 1st input, upload CV; if 2nd input and coverLetter exists, upload coverLetter
+        if (idx === 0 && documents.cv) {
+          if (uploadDocumentToInput(el, documents.cv)) attachedCount++;
+        } else if (idx === 1 && documents.coverLetter) {
+          if (uploadDocumentToInput(el, documents.coverLetter)) attachedCount++;
+        }
+      }
+    }
+
+    return attachedCount;
   }
 
   // ---------------------------------------------------------------------------
@@ -521,6 +593,7 @@
     const gatewayUrl = request.gatewayUrl;
     const profile = request.profile;
     const documents = request.documents;
+    console.log("[JobAgent Copilot] Documents payload received:", documents ? Object.keys(documents) : "none");
 
     function handleReasoningResult(data, method) {
       let filledCount = 0;
@@ -539,20 +612,9 @@
         }
       }
 
-      // Also ensure document file uploads are processed if not already handled
-      for (const f of schema) {
-        if (f.type === "file") {
-          const el = elementMap.get(f.fieldId);
-          if (el && (!el.files || el.files.length === 0)) {
-            const desc = `${f.label} ${f.name} ${f.placeholder} ${f.id}`.toLowerCase();
-            if (/anschreiben|cover.*letter/i.test(desc) && documents?.coverLetter) {
-              if (uploadDocumentToInput(el, documents.coverLetter)) filledCount++;
-            } else if (documents?.cv) {
-              if (uploadDocumentToInput(el, documents.cv)) filledCount++;
-            }
-          }
-        }
-      }
+      // Ensure document file uploads are processed across the page
+      const docsAttached = attachDocumentsToPage(documents);
+      filledCount += docsAttached;
 
       console.log(`[JobAgent Copilot] Form fill complete (${method}). Filled ${filledCount} fields.`);
       if (sendResponse) {

@@ -26,6 +26,11 @@ from src.core.profile import CandidateProfile, load_profile
 log = logging.getLogger(__name__)
 
 
+class CoverLetterGenerationError(RuntimeError):
+    """Raised when cover letter text generation fails due to missing credentials, rate limits, or API errors."""
+    pass
+
+
 class CoverLetterEngine:
     """Generates DIN 5008 compliant bilingual (German/English) cover letters."""
 
@@ -50,8 +55,12 @@ class CoverLetterEngine:
         lang: str = "de",
         use_gemini: bool = True,
         profile: Optional[CandidateProfile] = None,
+        body_text: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Generates DIN 5008 HTML and PDF cover letters tailored to the target role.
+
+        Raises:
+            CoverLetterGenerationError: When AI generation fails and no explicit body_text was provided.
 
         Returns:
             Dict with pdf_path, html_path, filename, company, role, generated_at.
@@ -110,9 +119,21 @@ class CoverLetterEngine:
             contact_parts.append(f"E-Mail: {pers.email}")
         contact_line = " &bull; ".join(contact_parts)
 
-        # 3. Determine body content (Gemini reasoning or template fallback)
-        body_text = None
-        if use_gemini and os.getenv("GEMINI_API_KEY"):
+        # 3. Determine body content (explicit body_text or Gemini reasoning)
+        if not body_text:
+            if not use_gemini:
+                raise CoverLetterGenerationError(
+                    "Cover letter generation requires AI reasoning (use_gemini=True) or explicit body_text. "
+                    "Generic static fallbacks are disabled to ensure all applications are tailored to the role and candidate CV."
+                )
+
+            key = os.getenv("GEMINI_API_KEY")
+            if not key:
+                raise CoverLetterGenerationError(
+                    "GEMINI_API_KEY is not configured in environment (.env). "
+                    "AI cover letter generation requires a valid Gemini API key to tailor content to candidate CV achievements and job description."
+                )
+
             try:
                 log.info("Generating customized cover letter with Gemini Flash for '%s' at '%s'...", role_display, comp_display)
                 skills_list = prof.technical_skills.core[:10]
@@ -148,20 +169,30 @@ class CoverLetterEngine:
                     salutation=salutation,
                 )
 
-                llm_response = call_gemini_semantic_analysis(prompt)
-                if llm_response and len(llm_response.strip()) > 100:
-                    body_text = llm_response.strip()
-            except Exception as e:
-                log.warning("Gemini cover letter generation failed, using clean template fallback: %s", e)
+                llm_response = call_gemini_semantic_analysis(prompt, raise_on_error=True)
+                if not llm_response or len(llm_response.strip()) < 80:
+                    raise CoverLetterGenerationError(
+                        "Gemini returned an empty or insufficient response (<80 chars). "
+                        "Please verify model configuration or prompt inputs."
+                    )
+                body_text = llm_response.strip()
 
-        if not body_text:
-            raw_tmpl = self._load_template_file(f"cover_letter_default.{'de' if lang.lower().startswith('de') else 'en'}.txt")
-            body_text = (
-                raw_tmpl
-                .replace("{job_title}", role_display)
-                .replace("{company}", comp_display)
-                .replace("{candidate_name}", cand_name)
-            )
+            except CoverLetterGenerationError:
+                raise
+            except Exception as e:
+                err_str = str(e).lower()
+                if "429" in err_str or "resource_exhausted" in err_str or "quota" in err_str:
+                    raise CoverLetterGenerationError(
+                        f"Gemini API quota exceeded or rate-limited (HTTP 429). "
+                        f"Please check your account quota or wait before retrying. Details: {e}"
+                    ) from e
+                if "api_key" in err_str or "permission" in err_str or "unauthenticated" in err_str:
+                    raise CoverLetterGenerationError(
+                        f"Gemini API key is invalid or unauthorized: {e}"
+                    ) from e
+                raise CoverLetterGenerationError(
+                    f"Gemini cover letter generation failed: {e}"
+                ) from e
 
         # Convert text paragraphs into HTML, stripping any trailing signature duplicates
         paragraphs = [p.strip() for p in body_text.split("\n\n") if p.strip()]

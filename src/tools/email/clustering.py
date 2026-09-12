@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from src.core.storage import JobAgentStorage
+from src.core.storage import JobAgentStorage, UNKNOWN_ROLE
 from src.tools.email.adapters import EmailRecord
 from src.tools.email.classifier import ClassificationResult, EmailClassifier
 from src.tools.email.normalizer import (
@@ -119,7 +119,7 @@ class ApplicationClusterer:
 
             app_id = self.storage.upsert_application(
                 company=canon_company,
-                role=canon_role or "Candidate",
+                role=canon_role or UNKNOWN_ROLE,
                 applied_date=record.received_time,
                 status=initial_status,
                 source=f"Email ({folder})",
@@ -146,7 +146,7 @@ class ApplicationClusterer:
             res = self.storage.record_interview(
                 company=canon_company,
                 interview_date=sched_date,
-                role=canon_role or "Software Engineer",
+                role=canon_role or UNKNOWN_ROLE,
                 application_id=app_id,
                 interview_type="Interview Invitation",
                 meeting_link=classification.meeting_link,

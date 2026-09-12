@@ -1,0 +1,28 @@
+{
+  "non_role_subject_markers": [
+    "webinar",
+    "netzwerk",
+    "bewerbungstraining",
+    "bildungsgutschein",
+    "fortbildung",
+    "coaching",
+    "workshop",
+    "jobalert",
+    "vertrieb und finanzkonzepte",
+    "match",
+    "exklusiv",
+    "sichern sie sich",
+    "platz sichern",
+    "newsletter",
+    "exclusive invitation",
+    "masterclass",
+    "training course",
+    "sales demo",
+    "demo buchen",
+    "lead generation"
+  ],
+  "fallback_role_patterns": [
+    "(?:als|für die Position|Position:|für die Stelle:?)\\s*[\"“']?([^\"”'\\n\\r/]+)",
+    "(?:role:|position:|job title:|application for|applied for:?|as a[n]?)\\s*[\"“']?([^\"”'\\n\\r/]+)"
+  ]
+}

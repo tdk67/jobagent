@@ -51,6 +51,16 @@ def test_normalize_company_name():
     assert normalize_company_name("DekaBank Deutsche Girozentrale ist eingegangen") == "DekaBank"
     assert normalize_company_name("Webmailer Amadeus Fire") == "Amadeus Fire"
     assert normalize_company_name("dwpbank als") == "dwpbank"
+    # Functional department suffix stripping
+    assert normalize_company_name("Trendtours HR") == "Trendtours"
+    assert normalize_company_name("Trendtours HR-Team") == "Trendtours"
+    assert normalize_company_name("Acme Recruiting") == "Acme"
+    assert normalize_company_name("Acme Recruiting Team") == "Acme"
+    assert normalize_company_name("Nova Talent Acquisition") == "Nova"
+    assert normalize_company_name("TechCorp Karriere") == "TechCorp"
+    assert normalize_company_name("Global Software Datenschutz") == "Global Software"
+    assert normalize_company_name("Global Corp Datenschutz") == "Global"  # Both functional and legal stripped
+    assert normalize_company_name("Example Bewerbermanagement") == "Example"
 
 
 def test_normalize_role_title():

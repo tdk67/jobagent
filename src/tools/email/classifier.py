@@ -29,7 +29,9 @@ log = logging.getLogger(__name__)
 
 def _load_classification_rules() -> Dict[str, Any]:
     """Loads externalized email classification rules separating data from code."""
-    data_path = Path(__file__).resolve().parent.parent / "data" / "email_classification_rules.json"
+    data_path = Path(__file__).resolve().parents[3] / "resources" / "email_classification_rules.json"
+    if not data_path.exists():
+        data_path = Path("resources") / "email_classification_rules.json"
     if data_path.exists():
         try:
             with open(data_path, "r", encoding="utf-8") as f:

@@ -105,7 +105,16 @@ cp config.example.json config.local.json
    JOBAGENT_API_TOKEN="your-secure-random-token"
    ```
 2. **`profile.local.json`** (Your personal information, git-ignored):
-   Update with your actual name, email, address, target roles, and work history. This profile is used locally to render official statutory reports and populate form assistant suggestions.
+   Update with your actual name, email, address, target roles, and work history. This profile is used locally to render official statutory reports, tailor AI cover letters, and populate form assistant suggestions.
+
+   > [!TIP]
+   > **🚀 Fast 30-Second Setup with Local AI Agents (Claude Coworker, Antigravity, Cursor)**:
+   > Instead of manually editing hundreds of lines of nested JSON, open the project in your local AI agent workspace and prompt it:
+   > 
+   > *"Please generate my `profile.local.json` by reading my existing CV at `./my_resume.pdf` (or docx). Follow the exact JSON structure and field names in `profile.example.json`. Ensure `technical_skills`, `work_experience`, bilingual summaries, and CEFR language proficiencies are accurately mapped. Do not transmit or commit my personal data."*
+   > 
+   > The local agent parses your PDF resume directly on your machine, formats the JSON adhering to `src/core/profile.py` schema, and writes `profile.local.json`—with **zero PII leakage** outside your local machine.
+
 3. **`config.local.json`** (Application settings, git-ignored):
    Configure which email providers to scan (`outlook_desktop`, `imap`, `gmail_mcp`), report styling, and LLM model designations (`gemini-2.5-flash`).
 
