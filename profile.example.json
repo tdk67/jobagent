@@ -60,6 +60,10 @@
       "git": 10
     }
   },
+  "languages": {
+    "german": "Fließend in Wort und Schrift / B2",
+    "english": "Verhandlungssicher / B2"
+  },
   "documents": {
     "englishCv": "C:\\path\\to\\cv_en.pdf",
     "germanCv": "C:\\path\\to\\cv_de.pdf",

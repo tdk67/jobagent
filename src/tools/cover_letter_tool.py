@@ -56,6 +56,8 @@ class CoverLetterEngine:
         use_gemini: bool = True,
         profile: Optional[CandidateProfile] = None,
         body_text: Optional[str] = None,
+        job_description: Optional[str] = None,
+        cv_text: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Generates DIN 5008 HTML and PDF cover letters tailored to the target role.
 
@@ -146,13 +148,23 @@ class CoverLetterEngine:
                         exp_lines.append(f"  * {role_title} at {comp}: {desc[:180]}")
                 exp_summary = "\n".join(exp_lines) if exp_lines else "Experienced Software Engineer"
 
-                profile_context = (
-                    f"- Candidate: {cand_name}\n"
-                    f"- Summary: {pers.summaryDe or pers.summaryEn or 'Experienced Senior Software Engineer'}\n"
-                    f"- Core Skills: {', '.join(skills_list)}\n"
-                    f"- Recent Experience:\n{exp_summary}\n"
-                    f"- Location: {pers.city or pers.address}\n"
-                )
+                if cv_text:
+                    profile_context = (
+                        f"- Candidate: {cand_name}\n"
+                        f"- Profile Context:\n{cv_text[:2500]}\n"
+                    )
+                else:
+                    profile_context = (
+                        f"- Candidate: {cand_name}\n"
+                        f"- Summary: {pers.summaryDe or pers.summaryEn or 'Experienced Senior Software Engineer'}\n"
+                        f"- Core Skills: {', '.join(skills_list)}\n"
+                        f"- Recent Experience:\n{exp_summary}\n"
+                        f"- Location: {pers.city or pers.address}\n"
+                    )
+
+                job_description_context = ""
+                if job_description and job_description.strip():
+                    job_description_context = f"Target Job Description:\n{job_description.strip()[:2500]}\n"
 
                 if contact_person:
                     salutation = f"Sehr geehrte(r) {contact_person}," if lang.lower().startswith("de") else f"Dear {contact_person},"
@@ -165,6 +177,7 @@ class CoverLetterEngine:
                     headline="Senior Software Engineer",
                     role_display=role_display,
                     comp_display=comp_display,
+                    job_description_context=job_description_context,
                     profile_context=profile_context,
                     salutation=salutation,
                 )

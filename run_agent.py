@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 # Force UTF-8 on Windows terminals
 if sys.platform == "win32":
@@ -29,6 +30,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%H:%M:%S",
 )
+log = logging.getLogger(__name__)
 
 from src.agent.coordinator import JobAgentCoordinator
 from src.core.config import load_config

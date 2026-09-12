@@ -399,8 +399,11 @@ class ImapAdapter(BaseEmailAdapter):
                 )
             server.close()
             server.logout()
+        except imaplib.IMAP4.error:
+            log.warning("IMAP authentication or protocol error (credentials redacted)")
+            return []
         except Exception as e:
-            log.warning("IMAP fetch failed: %s", e, exc_info=True)
+            log.warning("IMAP fetch failed: %s", type(e).__name__)
             return []
 
         return records
@@ -409,9 +412,17 @@ class ImapAdapter(BaseEmailAdapter):
 class GmailMcpAdapter(BaseEmailAdapter):
     """Adapter that reads emails via the Gmail Model Context Protocol (MCP) server."""
 
-    def __init__(self, mcp_client: Optional[Any] = None, search_query: str = "Bewerbung OR Interview OR Application"):
+    def __init__(self, mcp_client: Optional[Any] = None, search_query: Optional[str] = None):
         self.mcp_client = mcp_client
-        self.search_query = search_query
+        if search_query is not None:
+            self.search_query = search_query
+        else:
+            try:
+                from src.core.config import load_config
+                cfg = load_config()
+                self.search_query = getattr(getattr(cfg, "email_ingestion", None), "gmail_search_query", "Bewerbung OR Interview OR Application")
+            except Exception:
+                self.search_query = "Bewerbung OR Interview OR Application"
 
     def fetch_emails(
         self,

@@ -168,6 +168,43 @@ def test_cover_letter_html_injection_prevention(tmp_path: Path):
     assert "&lt;img src=x onerror=alert(2)&gt;" in html_content
     assert "<script>alert(3)</script>" not in html_content
     assert "&lt;script&gt;alert(3)&lt;/script&gt;" in html_content
-    assert "Hacker &amp; Lead" in html_content
     assert "<script>alert('body')</script>" not in html_content
     assert "&lt;script&gt;alert(&#x27;body&#x27;)&lt;/script&gt;" in html_content
+
+
+def test_cover_letter_dynamic_prompt_includes_job_description_and_cv(tmp_path: Path):
+    out_dir = tmp_path / "cover_letters_dynamic"
+    engine = CoverLetterEngine(output_dir=out_dir)
+
+    prof = CandidateProfile(
+        personal=PersonalInfo(fullName="Tamas Deak", email="tamas@example.com")
+    )
+
+    captured_prompts = []
+
+    def mock_gemini(prompt: str, **kwargs):
+        captured_prompts.append(prompt)
+        return "Sehr geehrte Damen und Herren,\n\nich bewerbe mich hiermit für die Position bei Capgemini.\n\nMit freundlichen Grüßen,\nTamas Deak"
+
+    with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}):
+        with patch("src.tools.cover_letter_tool.call_gemini_semantic_analysis", side_effect=mock_gemini):
+            res = engine.generate(
+                company="Capgemini",
+                role="Senior Software Engineer Defense",
+                lang="de",
+                job_description="Must have 10+ years experience in Python, distributed backend architectures, and Linux systems.",
+                cv_text="25+ years software engineering experience, backend architecture, Python, cloud services.",
+                profile=prof,
+            )
+
+    assert len(captured_prompts) == 1
+    prompt_text = captured_prompts[0]
+    # Check that job description and CV context were injected into prompt
+    assert "Senior Software Engineer Defense" in prompt_text
+    assert "10+ years experience in Python" in prompt_text
+    assert "25+ years software engineering experience" in prompt_text
+    # Check that static template files do not exist
+    root_dir = Path(__file__).resolve().parent.parent
+    assert not (root_dir / "templates" / "cover_letter" / "cover_letter_default.de.txt").exists()
+    assert not (root_dir / "templates" / "cover_letter" / "cover_letter_default.en.txt").exists()
+

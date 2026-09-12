@@ -16,6 +16,9 @@
     "default_popup": "popup.html",
     "default_title": "JobAgent Copilot"
   },
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": ["*://*/*"],

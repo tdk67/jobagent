@@ -91,7 +91,7 @@ class EmailIngestEngine:
                 log.warning("Failed to fetch emails via %s: %s", adapter.__class__.__name__, e, exc_info=True)
                 continue
 
-            folder_label = "Bewerbung" if "outlook" in adapter.__class__.__name__.lower() else "Inbox"
+            folder_label = "Bewerbung" if isinstance(adapter, OutlookDesktopAdapter) else "Inbox"
             for item in emails:
                 self.storage.save_raw_email(
                     entry_id=item.entry_id,

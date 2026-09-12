@@ -47,12 +47,15 @@ class PersonalInfo(BaseModel):
     workAuthorizationDe: Optional[str] = None
     workAuthorizationEn: Optional[str] = None
     birthDate: Optional[str] = None
+    headline: Optional[str] = None
     salaryExpectation: str = "Competitive"
     noticePeriod: str = "Immediately"
     linkedinUrl: Optional[str] = None
     githubUrl: Optional[str] = None
     summaryDe: Optional[str] = None
     summaryEn: Optional[str] = None
+    coverLetterDe: Optional[str] = None
+    coverLetterEn: Optional[str] = None
 
 
 class TechnicalSkills(BaseModel):
@@ -108,6 +111,8 @@ def load_profile(
     personal_dict = data.get("personal", {})
     job_search = data.get("jobSearch", {})
     if job_search:
+        if not personal_dict.get("headline"):
+            personal_dict["headline"] = job_search.get("headline")
         if not personal_dict.get("salaryExpectation"):
             personal_dict["salaryExpectation"] = job_search.get("salaryFormatted") or job_search.get("salaryExpectation") or "Competitive"
         if not personal_dict.get("noticePeriod"):
@@ -116,6 +121,10 @@ def load_profile(
             personal_dict["workAuthorizationDe"] = job_search.get("workAuthorizationDe")
         if not personal_dict.get("workAuthorizationEn"):
             personal_dict["workAuthorizationEn"] = job_search.get("workAuthorizationEn")
+
+    if not personal_dict.get("headline") and data.get("preferences", {}).get("targetRoles"):
+        personal_dict["headline"] = data["preferences"]["targetRoles"][0]
+
 
     if personal_dict.get("linkedin") and not personal_dict.get("linkedinUrl"):
         personal_dict["linkedinUrl"] = personal_dict["linkedin"]
@@ -140,9 +149,11 @@ def load_profile(
         pref_dict["locations"] = job_search["preferredLocations"]
     data["preferences"] = pref_dict
 
-    # Map languages
-    if "languages" in data and "languages" not in data:
-        data["languages"] = data["languages"]
+    # Map languages from alternate keys if present
+    if "languageSkills" in data and "languages" not in data:
+        data["languages"] = data["languageSkills"]
+    elif "language_skills" in data and "languages" not in data:
+        data["languages"] = data["language_skills"]
 
     # Consolidate QA memory strictly from profile (single source of truth)
     common_answers = data.get("common_answers", {})
@@ -156,7 +167,7 @@ def load_profile(
     if "workExperience" in data and "work_experience" not in data:
         data["work_experience"] = data["workExperience"]
 
-    if "education" in data and "education" not in data:
-        data["education"] = data["education"]
+    if "Education" in data and "education" not in data:
+        data["education"] = data["Education"]
 
     return CandidateProfile(**data)

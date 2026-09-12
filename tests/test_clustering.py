@@ -8,7 +8,8 @@ from src.tools.email.classifier import EmailClassifier
 from src.tools.email.clustering import ApplicationClusterer
 
 
-def test_clustering_merges_multiple_emails_for_same_application(tmp_path: Path):
+def test_clustering_merges_multiple_emails_for_same_application(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     db_path = tmp_path / "test_cluster.db"
     storage = JobAgentStorage(db_path=str(db_path))
     clusterer = ApplicationClusterer(storage=storage)

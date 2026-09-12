@@ -341,3 +341,165 @@ def test_form_reasoner_capgemini_edge_cases(temp_db: JobAgentStorage):
     # Assert Prior employment is false (Nein)
     assert mappings["f_prev_employed"] == "false"
 
+
+def test_form_reasoner_easy_apply_popup_fields(temp_db: JobAgentStorage):
+    """Verifies that Easy Apply popup fields (Headline, Summary, Cover letter textarea) are accurately resolved."""
+    profile = CandidateProfile(
+        personal=PersonalInfo(
+            fullName="Tamas Deak",
+            email="tamas.deak@example.com",
+            phone="+49 1520 000000",
+            city="Dietzenbach",
+            headline="Senior Software Engineer / Tech Lead",
+            summaryDe="Senior Software Engineer mit über 25 Jahren Erfahrung in verteilten Systemen.",
+            summaryEn="Senior Software Engineer with 25+ years experience in distributed systems.",
+            coverLetterDe="Sehr geehrte Damen und Herren,\n\ndie ausgeschriebene Position passt gut zu meiner Erfahrung.",
+            coverLetterEn="Dear Hiring Team,\n\nThe advertised position aligns well with my experience.",
+        ),
+        preferences=Preferences(
+            targetRoles=["Senior Software Engineer / Tech Lead"],
+            locations=["Frankfurt", "Dietzenbach"],
+        ),
+    )
+    reasoner = FormReasoner(storage=temp_db, profile=profile)
+
+    fields = [
+        {
+            "fieldId": "f_headline",
+            "label": "Headline",
+            "type": "text",
+            "placeholder": "e.g. Senior Software Engineer",
+        },
+        {
+            "fieldId": "f_summary",
+            "label": "Summary*",
+            "type": "textarea",
+        },
+        {
+            "fieldId": "f_cover_letter",
+            "label": "Cover letter",
+            "type": "textarea",
+        },
+        {
+            "fieldId": "f_anschreiben_de",
+            "label": "Anschreiben / Motivationsschreiben",
+            "type": "textarea",
+        },
+    ]
+
+    res = reasoner.reason_form(fields)
+    mappings = res["mappings"]
+
+    assert mappings["f_headline"] == "Senior Software Engineer / Tech Lead"
+    assert "25" in mappings["f_summary"]
+    assert "Dear Hiring Team" in mappings["f_cover_letter"]
+    assert "Sehr geehrte Damen und Herren" in mappings["f_anschreiben_de"]
+
+
+def test_form_reasoner_middle_name_does_not_fall_through_to_first_name(temp_db: JobAgentStorage):
+    profile = CandidateProfile(
+        personal=PersonalInfo(
+            fullName="Tamas Deak",
+            firstName="Tamas",
+            lastName="Deak",
+            middleName="",
+            email="tamas@example.com",
+        )
+    )
+    reasoner = FormReasoner(storage=temp_db, profile=profile)
+
+    fields = [
+        {"fieldId": "f_first", "label": "Vorname*", "type": "text"},
+        {"fieldId": "f_middle", "label": "Zweiter Vorname", "type": "text"},
+        {"fieldId": "f_last", "label": "Nachname*", "type": "text"},
+    ]
+
+    res = reasoner.reason_form(fields)
+    mappings = res["mappings"]
+
+    assert mappings["f_first"] == "Tamas"
+    assert mappings["f_middle"] == ""  # Never fall through to Tamas!
+    assert mappings["f_last"] == "Deak"
+
+
+def test_form_reasoner_dynamic_languages_no_hardcoding(temp_db: JobAgentStorage):
+    # Candidate with B2 in English and B1 in German (NOT C1!)
+    profile = CandidateProfile(
+        personal=PersonalInfo(fullName="Test Candidate", email="test@example.com"),
+        languages={"english": "B2 - Fluent", "german": "B1 - Intermediate"},
+    )
+    reasoner = FormReasoner(storage=temp_db, profile=profile)
+
+    fields = [
+        {"fieldId": "f_en", "label": "English skills / proficiency level", "type": "text"},
+        {"fieldId": "f_de", "label": "Wie gut sind Ihre Deutschkenntnisse?", "type": "text"},
+    ]
+
+    res = reasoner.reason_form(fields)
+    mappings = res["mappings"]
+
+    # Must strictly match profile config, never hardcode C1 or B2
+    assert mappings["f_en"] == "B2 - Fluent"
+    assert mappings["f_de"] == "B1 - Intermediate"
+
+
+def test_form_reasoner_prior_employment_phrase_variation(temp_db: JobAgentStorage):
+    profile = CandidateProfile(
+        personal=PersonalInfo(fullName="Test Candidate", email="test@example.com")
+    )
+    reasoner = FormReasoner(storage=temp_db, profile=profile)
+
+    fields = [
+        {
+            "fieldId": "f_employed",
+            "label": "Warst du bereits bei der Capgemini Gruppe angestellt?*",
+            "type": "select",
+            "options": [
+                {"value": "", "text": "Keine Auswahl"},
+                {"value": "1", "text": "Ja"},
+                {"value": "2", "text": "Nein"},
+            ],
+        },
+        {
+            "fieldId": "f_work_auth_long",
+            "label": "Hast du eine Arbeitserlaubnis in dem Land, in dem du dich bewirbst?*",
+            "type": "select",
+            "options": [
+                {"value": "", "text": "Keine Auswahl"},
+                {"value": "true", "text": "Ja, ich besitze eine gültige Arbeitserlaubnis"},
+                {"value": "false", "text": "Nein"},
+            ],
+        },
+    ]
+
+    res = reasoner.reason_form(fields)
+    mappings = res["mappings"]
+
+    assert mappings["f_employed"] == "2"  # Nein
+    assert mappings["f_work_auth_long"] == "true"  # Ja
+
+
+def test_form_reasoner_country_options_avoid_false_substring_matches(temp_db: JobAgentStorage):
+    profile = CandidateProfile(
+        personal=PersonalInfo(fullName="Test Candidate", email="test@example.com", countryDe="Deutschland")
+    )
+    reasoner = FormReasoner(storage=temp_db, profile=profile)
+
+    fields = [
+        {
+            "fieldId": "f_country",
+            "label": "Land des aktuellen Wohnsitzes*",
+            "type": "select",
+            "options": [
+                {"value": "DK", "text": "Dänemark"},
+                {"value": "SE", "text": "Schweden"},
+                {"value": "NL", "text": "Niederlande"},
+                {"value": "DE", "text": "Deutschland"},
+            ],
+        }
+    ]
+
+    res = reasoner.reason_form(fields)
+    assert res["mappings"]["f_country"] == "DE"
+
+

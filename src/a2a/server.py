@@ -193,7 +193,7 @@ def create_a2a_app(
         allow_origin_regex=r"^chrome-extension://[a-z]+$",
         allow_credentials=False,
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["*"],
+        allow_headers=["Authorization", "X-JobAgent-Token", "Content-Type"],
     )
 
     # In-memory queue for SSE event broadcast
@@ -480,49 +480,49 @@ def create_a2a_app(
         docs = user_profile.documents
         bundle: Dict[str, Any] = {}
 
-        # 1. CV (German preferred, fallback English)
-        cv_path = docs.germanCv or docs.englishCv
-        if cv_path and Path(cv_path).exists():
-            p = Path(cv_path)
-            content = p.read_bytes()
-            bundle["cv"] = {
+        async def _encode_file(path_str: Optional[str], key: str) -> None:
+            if not path_str:
+                return
+            p = Path(path_str)
+            if not p.exists():
+                return
+            # Read bytes off the event-loop thread to avoid blocking
+            content = await asyncio.to_thread(p.read_bytes)
+            bundle[key] = {
                 "filename": p.name,
                 "dataUrl": f"data:application/pdf;base64,{base64.b64encode(content).decode('ascii')}",
                 "sizeBytes": len(content),
             }
 
-        # 2. Cover Letter
-        cl_path = docs.coverLetter
-        if cl_path and Path(cl_path).exists():
-            p = Path(cl_path)
-            content = p.read_bytes()
-            bundle["coverLetter"] = {
-                "filename": p.name,
-                "dataUrl": f"data:application/pdf;base64,{base64.b64encode(content).decode('ascii')}",
-                "sizeBytes": len(content),
-            }
-
-        # 3. Reference Letter
-        ref_path = docs.referenceLetter
-        if ref_path and Path(ref_path).exists():
-            p = Path(ref_path)
-            content = p.read_bytes()
-            bundle["reference"] = {
-                "filename": p.name,
-                "dataUrl": f"data:application/pdf;base64,{base64.b64encode(content).decode('ascii')}",
-                "sizeBytes": len(content),
-            }
-
+        await asyncio.gather(
+            _encode_file(docs.germanCv or docs.englishCv, "cv"),
+            _encode_file(docs.coverLetter, "coverLetter"),
+            _encode_file(docs.referenceLetter, "reference"),
+        )
         return bundle
 
     @app.post("/api/v1/cover_letter/generate", dependencies=[Depends(verify_token)])
     async def generate_cover_letter_api(payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Generates a DIN 5008 cover letter for a given company and job role."""
+        """Generates a DIN 5008 cover letter dynamically tailored to target company and role."""
         company = payload.get("company", "Unternehmen")
         role = payload.get("role", "Software Engineer")
         lang = payload.get("lang", "de")
-        from src.tools.cover_letter_tool import CoverLetterEngine
+        job_description = payload.get("job_description") or payload.get("jobDescription")
+        cv_text = payload.get("cv_text") or payload.get("cvText")
+
+        from src.tools.cover_letter_tool import CoverLetterEngine, CoverLetterGenerationError
         engine = CoverLetterEngine()
-        return engine.generate(company=company, role=role, lang=lang)
+        try:
+            return engine.generate(
+                company=company,
+                role=role,
+                lang=lang,
+                job_description=job_description,
+                cv_text=cv_text,
+            )
+        except CoverLetterGenerationError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Cover letter generation error: {e}")
 
     return app

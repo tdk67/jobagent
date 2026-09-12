@@ -54,8 +54,15 @@ class FormReasoner:
         pers = self.profile.personal
         prefs = self.profile.preferences
 
+        # 0. Middle Name / Zweiter Vorname (MUST be evaluated before First Name)
+        if any(term in combined for term in ["middle name", "middlename", "zweiter vorname", "zweiter name", "weitere vornamen"]):
+            middle_name = pers.middleName or ""
+            return {"value": middle_name, "confidence": 1.0, "reasoning": "Candidate middle name (empty if none)"}
+
         # 1. First Name
-        if any(term in combined for term in ["first name", "firstname", "vorname", "given name"]):
+        if any(term in combined for term in ["first name", "firstname", "vorname", "given name"]) and not any(
+            skip in combined for skip in ["zweiter", "middle", "weitere"]
+        ):
             first_name = pers.fullName.split()[0] if pers.fullName else ""
             return {"value": first_name, "confidence": 1.0, "reasoning": "Core profile first name"}
 
@@ -67,7 +74,7 @@ class FormReasoner:
 
         # 3. Full Name
         if any(term in combined for term in ["full name", "fullname", "name", "ihr name"]) and not any(
-            skip in combined for skip in ["company", "file", "user", "first", "last", "vorname", "nachname"]
+            skip in combined for skip in ["company", "file", "user", "first", "last", "vorname", "nachname", "zweiter", "middle"]
         ):
             return {"value": pers.fullName, "confidence": 1.0, "reasoning": "Core profile full name"}
 
@@ -79,44 +86,69 @@ class FormReasoner:
         if any(term in combined for term in ["phone", "telefon", "mobile", "handy", "rufnummer", "contact number"]) or tag_type == "tel":
             return {"value": pers.phone, "confidence": 1.0, "reasoning": "Core profile phone"}
 
+        # 5a. Phone country code / dialing prefix (e.g. "Länder-/Regionsvorwahl", "Country Code")
+        # Must come AFTER the phone check to avoid false-positives on plain "Telefon" labels.
+        if any(term in combined for term in [
+            "länder", "regionsvorwahl", "vorwahl", "country code", "dialing code",
+            "phone code", "country prefix", "area code",
+        ]) and pers.phoneCountryCode:
+            return {"value": pers.phoneCountryCode, "confidence": 1.0, "reasoning": "Core profile phone country code"}
+
         # 6. Preferred Job Location / Standort (Not residential street)
         if any(term in combined for term in ["welchen standort", "bevorzugter standort", "gewünschter standort", "target location", "primary location"]) or (
             "standort" in combined and any(k in combined for k in ["bewerben", "primär", "bevorzugt", "arbeiten", "wunsch"])
         ):
-            target_loc = prefs.locations[0] if prefs.locations else (pers.city or "Frankfurt am Main")
-            return {"value": target_loc, "confidence": 0.98, "reasoning": "Target job location preference"}
+            target_loc = prefs.locations[0] if (prefs.locations and len(prefs.locations) > 0) else pers.city
+            if target_loc:
+                return {"value": target_loc, "confidence": 0.98, "reasoning": "Target job location preference from profile configuration"}
 
         # 7. City / Residence City
         if any(term in combined for term in ["city", "ort", "stadt", "wohnort", "residence city"]):
             city = pers.city or self._extract_city_from_address(pers.address)
-            return {"value": city, "confidence": 1.0, "reasoning": "Core profile city"}
+            if city:
+                return {"value": city, "confidence": 1.0, "reasoning": "Core profile city"}
 
         # 8. Country of Residence
         if any(term in combined for term in ["land des aktuellen wohnsitzes", "aktuellen wohnsitz", "wohnsitzland", "country of residence", "residence country"]):
-            return {"value": pers.countryDe or "Deutschland", "confidence": 1.0, "reasoning": "Country of residence"}
+            country = pers.countryDe or pers.countryEn
+            if country:
+                return {"value": country, "confidence": 1.0, "reasoning": "Configured country of residence"}
 
         if any(term in combined for term in ["address", "anschrift", "adresse", "street", "strasse"]) and not any(k in combined for k in ["email", "e-mail", "mail"]):
             return {"value": pers.address, "confidence": 1.0, "reasoning": "Core profile address"}
 
-        # 9. Language Proficiency (Strict adherence to candidate levels: German is B2, English is C1)
-        if any(term in combined for term in ["deutschkenntnisse", "deutsch-kenntnisse", "german skills", "german proficiency"]) or (
-            "deutsch" in combined and any(k in combined for k in ["kenntnis", "sprach", "level", "wie gut", "niveau"])
-        ):
-            ger_level = self.profile.languages.get("german", "B2 - selbstständige Sprachverwendung")
-            return {"value": ger_level, "confidence": 1.0, "reasoning": "Core profile German proficiency (B2)"}
+        # 9. Language Proficiency (Dynamically derived from candidate's profile configuration - zero hardcoded levels)
+        for lang_name, lang_level in (self.profile.languages or {}).items():
+            if not lang_level:
+                continue
+            norm_lang = lang_name.lower().strip()
+            aliases = [norm_lang]
+            if norm_lang in ("german", "deutsch"):
+                aliases.extend(["deutsch", "german", "deutschkenntnisse"])
+            elif norm_lang in ("english", "englisch"):
+                aliases.extend(["englisch", "english", "englischkenntnisse"])
+            elif norm_lang in ("french", "französisch", "franzosisch"):
+                aliases.extend(["französisch", "franzosisch", "french"])
+            elif norm_lang in ("spanish", "spanisch"):
+                aliases.extend(["spanisch", "spanish"])
+            elif norm_lang in ("italian", "italienisch"):
+                aliases.extend(["italienisch", "italian"])
 
-        if any(term in combined for term in ["englischkenntnisse", "english skills", "english proficiency"]) or (
-            "englisch" in combined and any(k in combined for k in ["kenntnis", "sprach", "level", "wie gut", "niveau"])
-        ):
-            eng_level = self.profile.languages.get("english", "C1 - fachkundige Sprachkenntnisse")
-            return {"value": eng_level, "confidence": 1.0, "reasoning": "Core profile English proficiency (C1)"}
+            if any(alias in combined for alias in aliases) and any(
+                k in combined for k in ["kenntnis", "sprach", "level", "proficiency", "wie gut", "niveau", "skills"]
+            ):
+                return {"value": str(lang_level), "confidence": 1.0, "reasoning": f"Profile configured language proficiency for {lang_name}"}
 
         # 10. Work Authorization / Legal Right to Work
-        if any(term in combined for term in ["arbeitserlaubnis", "work authorization", "work permit", "legal right to work"]):
-            return {"value": "Ja", "confidence": 1.0, "reasoning": "Full EU/German work authorization"}
+        if any(term in combined for term in ["arbeitserlaubnis", "work authorization", "work permit", "legal right to work", "erlaubnis in dem land"]):
+            auth_val = pers.workAuthorizationDe or pers.workAuthorizationEn or "Ja"
+            return {"value": auth_val, "confidence": 1.0, "reasoning": "Configured work authorization status"}
 
         # 11. Prior Employment at Target Company
-        if any(term in combined for term in ["bereits angestellt", "previously employed", "bereits gearbeitet", "früher beschäftigt", "früher angestellt"]):
+        if (
+            any(term in combined for term in ["bereits angestellt", "previously employed", "bereits gearbeitet", "früher beschäftigt", "früher angestellt"])
+            or (("bereits" in combined or "früher" in combined or "previously" in combined) and ("angestellt" in combined or "beschäftigt" in combined or "employed" in combined or "gearbeitet" in combined))
+        ):
             return {"value": "Nein", "confidence": 1.0, "reasoning": "No prior employment with company"}
 
         # 12. LinkedIn
@@ -150,6 +182,25 @@ class FormReasoner:
         # 19. Privacy Policy / Data Protection Consent
         if any(term in combined for term in ["datenschutzerklärung", "datenschutzerklaerung", "datenschutz", "privacy policy"]):
             return {"value": "true", "confidence": 1.0, "reasoning": "Privacy policy consent"}
+
+        # 20. Professional Headline / Title (common in LinkedIn Easy Apply)
+        if any(term in combined for term in ["headline", "berufsbezeichnung", "professional headline", "profil-slogan", "kurztitel"]):
+            headline_val = pers.headline or (prefs.targetRoles[0] if prefs.targetRoles else "")
+            return {"value": headline_val, "confidence": 0.98, "reasoning": "Candidate professional headline"}
+
+        # 21. Summary / Bio / About Me (common in LinkedIn Easy Apply textarea)
+        if any(term in combined for term in ["summary", "zusammenfassung", "profilzusammenfassung", "über mich", "ueber mich", "about me", "professional summary", "kurzprofil"]):
+            is_german = any(term in combined for term in ["zusammenfassung", "über mich", "ueber mich", "kurzprofil"])
+            summary_val = (pers.summaryDe if is_german else (pers.summaryEn or pers.summaryDe)) or pers.summaryDe or pers.summaryEn
+            if summary_val:
+                return {"value": summary_val, "confidence": 0.98, "reasoning": "Candidate profile summary"}
+
+        # 22. Text Cover Letter / Motivation / Essay (when presented as textarea or text input)
+        if any(term in combined for term in ["cover letter", "coverletter", "anschreiben", "motivationsschreiben", "motivation", "warum bewerben"]):
+            is_german = any(term in combined for term in ["anschreiben", "motivationsschreiben", "warum bewerben"])
+            cover_val = (pers.coverLetterDe if is_german else (pers.coverLetterEn or pers.coverLetterDe)) or pers.coverLetterDe or pers.coverLetterEn
+            if cover_val:
+                return {"value": cover_val, "confidence": 0.98, "reasoning": "Candidate default cover letter / motivation text"}
 
         return None
 
@@ -237,9 +288,6 @@ class FormReasoner:
         # ---------------------------------------------------------------------
         # Pass 2: Multimodal Gemini 3.8 Flash Semantic Reasoning
         # ---------------------------------------------------------------------
-        # ---------------------------------------------------------------------
-        # Pass 2: Multimodal Gemini 3.8 Flash Semantic Reasoning
-        # ---------------------------------------------------------------------
         if unmapped_fields and os.getenv("GEMINI_API_KEY"):
             llm_results = self._reason_with_gemini(unmapped_fields, page_url)
             for fid, result in llm_results.items():
@@ -298,20 +346,24 @@ class FormReasoner:
             for opt in options:
                 txt = (opt.get("text", "") if isinstance(opt, dict) else str(opt)).lower()
                 val = (opt.get("value", "") if isinstance(opt, dict) else str(opt)).lower()
-                # Find all CEFR mentions in this option
                 opt_cefrs = [c.lower() for c in re.findall(r"\b([abc][12])\b", f"{txt} {val}", re.IGNORECASE)]
-                # If target is B2, option must contain B2 and NOT only C1 or A1
                 if target_cefr in opt_cefrs:
                     return opt.get("value") if isinstance(opt, dict) and opt.get("value") is not None else (opt.get("text") if isinstance(opt, dict) else opt)
 
-        # Filter out placeholder prompt options like "Keine Auswahl", "Select", "Bitte wählen"
-        candidate_opts = []
-        for opt in options:
-            txt = (opt.get("text", "") if isinstance(opt, dict) else str(opt)).lower().strip()
-            val = (opt.get("value", "") if isinstance(opt, dict) else str(opt)).lower().strip()
-            if (not val or val in ("-1", "0", "")) and any(p in txt for p in ["bitte", "auswählen", "select", "choose", "keine auswahl"]):
-                continue
-            candidate_opts.append(opt)
+        # Filter out placeholder prompt options like "Keine Auswahl", "Select", "Bitte wählen".
+        # Detection is intentionally text-only: some portals (e.g. SAP SuccessFactors) use
+        # non-empty, non-numeric option values (GUIDs, "NONDISCLOSURE") for placeholders,
+        # so inspecting optVal alone is not sufficient.
+        _PLACEHOLDER_RE = re.compile(
+            r"^(keine.*auswahl|bitte.*wählen|bitte.*wähle|please.*select|select\.{0,3}$|choose\.{0,3}$|---)",
+            re.IGNORECASE,
+        )
+        candidate_opts = [
+            opt for opt in options
+            if not _PLACEHOLDER_RE.match(
+                (opt.get("text", "") if isinstance(opt, dict) else str(opt)).lower().strip()
+            )
+        ]
 
         if not candidate_opts:
             candidate_opts = options
@@ -346,11 +398,16 @@ class FormReasoner:
                     return opt.get("value") if isinstance(opt, dict) and opt.get("value") is not None else (opt.get("text") if isinstance(opt, dict) else opt)
 
         # 3. Country matching (Germany / Deutschland)
-        if any(g in ans_clean for g in ["deutschland", "germany", "de"]):
+        if any(g in ans_clean for g in ["deutschland", "germany"]):
             for opt in candidate_opts:
                 txt = (opt.get("text", "") if isinstance(opt, dict) else str(opt)).lower()
                 val = (opt.get("value", "") if isinstance(opt, dict) else str(opt)).lower()
-                if any(g in txt or g == val for g in ["deutschland", "germany", "de", "deu"]):
+                if (
+                    re.search(r"\b(deutschland|germany)\b", txt)
+                    or re.search(r"\b(deutschland|germany)\b", val)
+                    or val in ("de", "deu")
+                    or txt in ("de", "deu")
+                ):
                     return opt.get("value") if isinstance(opt, dict) and opt.get("value") is not None else (opt.get("text") if isinstance(opt, dict) else opt)
 
         return None
@@ -396,13 +453,16 @@ Form Fields to Answer:
 {json.dumps(simplified_fields, indent=2, ensure_ascii=False)}
 
 Guidelines:
-1. For language proficiency questions, match strictly against Candidate Profile Languages: German is B2 (NOT C1 or C2). English is C1. Never select C1/C2 for German.
-2. For job location questions (e.g. "Für welchen Standort möchtest du dich primär bewerben?"), use the candidate's preferred work location (e.g. "Frankfurt am Main" or "Frankfurt"), NEVER their home street address.
+1. For language proficiency questions, match strictly against the candidate's configured "Languages" dictionary provided above. Select the option or level corresponding to the candidate's actual configured level for that language. Never invent language levels.
+2. For job location questions, use the candidate's preferred work location from Preferences (Preferences.locations), or leave null if not configured. Never use their home street address.
 3. For select/radio fields with options, select the exact option value or text that best matches the candidate's profile.
 4. For questions regarding experience years, match against the candidate's skills.
 5. For German questions, respond accurately in German or select the matching German option.
-6. Work authorization, legal status, and visa requirements must be derived strictly from the candidate's established answers (EU/German citizen with full work authorization).
-7. If a field cannot be answered truthfully from the profile context, leave "value" as null.
+6. Work authorization, legal status, and visa requirements must be derived strictly from the candidate's profile and established answers.
+7. For open essay or motivation questions (e.g. "Warum möchten Sie bei uns arbeiten?", "Why are you interested in this role?", "Motivationsschreiben"), craft a concise, professional 1-2 paragraph response tailored to the candidate's core achievements and the target role.
+8. For headline or professional title questions, use the candidate's professional headline from Personal.headline.
+9. For summary or bio questions, provide the candidate's professional summary in the matching language (German or English).
+10. If a field cannot be answered truthfully from the profile context, leave "value" as null.
 
 Output strictly valid JSON conforming to this schema:
 {{

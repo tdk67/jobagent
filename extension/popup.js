@@ -50,7 +50,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (typeof chrome !== "undefined" && chrome?.storage?.local) {
       await chrome.storage.local.set({ jobagent_token: token });
     }
-    localStorage.setItem("jobagent_token", token);
   }
 
   async function getStoredProfile() {
@@ -70,9 +69,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (typeof chrome !== "undefined" && chrome?.storage?.local) {
       await chrome.storage.local.set({ jobagent_cached_profile: profile });
     }
-    try {
-      localStorage.setItem("jobagent_cached_profile", JSON.stringify(profile));
-    } catch (e) {}
   }
 
   function displayProfile(profile, isOnline) {
@@ -380,23 +376,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   });
 
-  // Message Bridge: Proxy form reasoning requests from content script to bypass page mixed-content restrictions
-  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg.action === "request_gateway_reason") {
-      fetch(`${gatewayUrl}/api/v1/form/reason`, {
-        method: "POST",
-        headers: getAuthHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(msg.payload),
-      })
-        .then((r) => {
-          if (!r.ok) throw new Error(`Gateway returned HTTP ${r.status}`);
-          return r.json();
-        })
-        .then((data) => sendResponse({ ok: true, data }))
-        .catch((err) => sendResponse({ ok: false, error: err.message }));
-      return true; // async reply
-    }
-  });
 
   // 4. Open Dashboard (P1 fix: clean URL without query token; auth via loopback/headers)
   btnDashboard.addEventListener("click", () => {

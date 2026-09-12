@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import ipaddress
 import json
 import logging
@@ -63,7 +64,7 @@ class JobArchiveEngine:
             md_content = self.extractor.to_markdown(raw_html, title=role, company=company)
             metadata = self.extractor.extract_metadata(raw_html)
         else:
-            md_content = f"# {role}\n**Company:** {company}\n**URL:** {job_url or 'N/A'}\n\n[Archived via JobAgent]"
+            md_content = f"# {html.escape(role)}\n**Company:** {html.escape(company)}\n**URL:** {html.escape(job_url or 'N/A')}\n\n[Archived via JobAgent]"
             metadata = {"salary": None, "location": None, "work_model": None}
 
         with open(md_path, "w", encoding="utf-8") as f:
