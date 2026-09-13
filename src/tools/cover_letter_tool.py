@@ -58,6 +58,8 @@ class CoverLetterEngine:
         body_text: Optional[str] = None,
         job_description: Optional[str] = None,
         cv_text: Optional[str] = None,
+        user_feedback: Optional[str] = None,
+        structured: bool = False,
     ) -> Dict[str, Any]:
         """Generates DIN 5008 HTML and PDF cover letters tailored to the target role.
 
@@ -171,6 +173,12 @@ class CoverLetterEngine:
                 else:
                     salutation = "Sehr geehrte Damen und Herren," if lang.lower().startswith("de") else "Dear Hiring Team,"
 
+                user_guidance_context = (
+                    f"\nSpecific User Guidance / Focus Areas:\n{user_feedback.strip()}\n"
+                    if user_feedback and user_feedback.strip()
+                    else ""
+                )
+
                 prompt_template = self._load_template_file(f"cover_letter_prompt_{'de' if lang.lower().startswith('de') else 'en'}.txt")
                 prompt = prompt_template.format(
                     cand_name=cand_name,
@@ -178,6 +186,7 @@ class CoverLetterEngine:
                     role_display=role_display,
                     comp_display=comp_display,
                     job_description_context=job_description_context,
+                    user_guidance_context=user_guidance_context,
                     profile_context=profile_context,
                     salutation=salutation,
                 )
@@ -242,13 +251,19 @@ class CoverLetterEngine:
 
         # 5. Compile PDF via Playwright
         try:
-            from playwright.sync_api import sync_playwright
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                page = browser.new_page()
-                page.goto(html_path.as_uri())
-                page.pdf(path=str(pdf_path), format="A4", print_background=True)
-                browser.close()
+            def _compile_pdf_thread() -> None:
+                from playwright.sync_api import sync_playwright
+                with sync_playwright() as p:
+                    browser = p.chromium.launch(headless=True)
+                    page = browser.new_page()
+                    page.goto(html_path.as_uri())
+                    page.pdf(path=str(pdf_path), format="A4", print_background=True)
+                    browser.close()
+
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_compile_pdf_thread)
+                future.result(timeout=15)
             log.info("Cover letter PDF compiled successfully: %s", pdf_path)
         except Exception as e:
             log.warning("Playwright PDF generation failed: %s. HTML remains available at %s", e, html_path)
@@ -256,7 +271,7 @@ class CoverLetterEngine:
         # 6. Update profile.local.json with new cover letter path
         self._update_profile_cover_letter(str(pdf_path), comp_display, role_display)
 
-        return {
+        result_payload: Dict[str, Any] = {
             "pdf_path": str(pdf_path) if pdf_path.exists() else str(html_path),
             "html_path": str(html_path),
             "filename": pdf_path.name if pdf_path.exists() else html_path.name,
@@ -265,6 +280,21 @@ class CoverLetterEngine:
             "language": lang,
             "generated_at": now.isoformat(),
         }
+
+        if structured:
+            result_payload.update({
+                "formattedDate": formatted_date,
+                "recipient": recipient_display,
+                "subject": raw_subject,
+                "paragraphs": filtered_paragraphs,
+                "closing": closing,
+                "signatureName": cand_name,
+                "targetRoleCompany": f"{role_display} at {comp_display}",
+                "body_html": body_html,
+                "body_text": body_text or "",
+            })
+
+        return result_payload
 
     def _update_profile_cover_letter(self, pdf_path: str, company: str, role: str) -> None:
         """Updates documents.coverLetter in profile.local.json."""

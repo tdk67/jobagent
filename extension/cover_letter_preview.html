@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Cover Letter Studio & Review - JobAgent</title>
+<style>
+  @page {
+    size: A4;
+    margin: 20mm 22mm 20mm 22mm;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11pt;
+    line-height: 1.55;
+    color: #222;
+    margin: 0;
+    padding: 0;
+    background: #0b1329;
+    color-scheme: dark;
+  }
+
+  /* Top Navigation & Feedback Toolbar */
+  .toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    background: #0f172a;
+    color: #f8fafc;
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+  .toolbar-brand {
+    font-weight: 700;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .btn {
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s;
+  }
+  .btn-primary {
+    background: #2563eb;
+    color: #fff;
+  }
+  .btn-primary:hover {
+    background: #1d4ed8;
+  }
+  .btn-secondary {
+    background: #334155;
+    color: #f8fafc;
+  }
+  .btn-secondary:hover {
+    background: #475569;
+  }
+  .btn-accent {
+    background: #10b981;
+    color: #fff;
+  }
+  .btn-accent:hover {
+    background: #059669;
+  }
+  .status-toast {
+    font-size: 12px;
+    color: #38bdf8;
+    margin-left: 8px;
+  }
+
+  /* Studio Workspace: Split between Feedback/Controls & DIN 5008 Paper Sheet */
+  .studio-layout {
+    display: flex;
+    gap: 24px;
+    max-width: 1400px;
+    margin: 20px auto 40px auto;
+    padding: 0 20px;
+  }
+
+  /* Left Panel: Direct Hints & AI Feedback */
+  .studio-sidebar {
+    flex: 0 0 380px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .panel-card {
+    background: #1e293b;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    color: #f8fafc;
+  }
+
+  .panel-title {
+    font-size: 14px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: #38bdf8;
+  }
+
+  .hint-box {
+    background: rgba(245, 158, 11, 0.1);
+    border-left: 3px solid #f59e0b;
+    padding: 10px;
+    border-radius: 4px;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: #fde68a;
+  }
+
+  .hint-box strong {
+    color: #fff;
+  }
+
+  .feedback-input {
+    width: 100%;
+    background: #0f172a;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px;
+    color: #fff;
+    font-size: 12px;
+    padding: 8px 10px;
+  }
+
+  .feedback-input:focus {
+    outline: none;
+    border-color: #38bdf8;
+  }
+
+  .feedback-textarea {
+    width: 100%;
+    min-height: 90px;
+    background: #0f172a;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px;
+    color: #fff;
+    font-size: 12px;
+    padding: 8px 10px;
+    resize: vertical;
+    line-height: 1.4;
+  }
+
+  .feedback-textarea:focus {
+    outline: none;
+    border-color: #38bdf8;
+  }
+
+  .anti-slop-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(16, 185, 129, 0.15);
+    color: #34d399;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .anti-slop-list {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 11px;
+    color: #94a3b8;
+    line-height: 1.4;
+  }
+
+  .anti-slop-list li {
+    margin-bottom: 4px;
+  }
+
+  /* Right Panel: Paper Simulation */
+  .paper-wrapper {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+  }
+
+  .page-container {
+    width: 210mm;
+    min-height: 297mm;
+    background: #ffffff;
+    color: #222;
+    padding: 22mm 22mm 22mm 22mm;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+    border-radius: 4px;
+    color-scheme: light;
+  }
+
+  /* DIN 5008 Layout */
+  .header {
+    border-bottom: 2px solid #0056b3;
+    padding-bottom: 10px;
+    margin-bottom: 20px;
+  }
+  .name {
+    font-size: 18pt;
+    font-weight: bold;
+    color: #0056b3;
+    margin: 0 0 4px 0;
+  }
+  .contact-info {
+    font-size: 9.5pt;
+    color: #555;
+  }
+  .recipient {
+    margin-bottom: 18px;
+    font-size: 10.5pt;
+    line-height: 1.35;
+    min-height: 48px;
+  }
+  .date {
+    margin-bottom: 16px;
+    font-size: 10pt;
+    color: #555;
+    text-align: right;
+  }
+  .subject {
+    font-size: 12.5pt;
+    font-weight: bold;
+    color: #111;
+    margin-bottom: 16px;
+  }
+  p {
+    margin: 0 0 13px 0;
+    text-align: justify;
+  }
+  .signature {
+    margin-top: 22px;
+  }
+  .signature-name {
+    font-weight: bold;
+    margin-top: 6px;
+  }
+
+  /* Inline editable state */
+  [contenteditable="true"] {
+    outline: 2px dashed #3b82f6;
+    padding: 3px 5px;
+    border-radius: 3px;
+    background: rgba(239, 246, 255, 0.7);
+  }
+
+  @media print {
+    body {
+      background: #ffffff !important;
+      color: #000 !important;
+    }
+    .toolbar, .studio-sidebar {
+      display: none !important;
+    }
+    .studio-layout {
+      margin: 0 !important;
+      padding: 0 !important;
+      display: block !important;
+    }
+    .paper-wrapper {
+      display: block !important;
+    }
+    .page-container {
+      margin: 0 !important;
+      padding: 0 !important;
+      box-shadow: none !important;
+      border-radius: 0 !important;
+      width: 100% !important;
+      min-height: auto !important;
+    }
+    [contenteditable="true"] {
+      outline: none !important;
+      background: none !important;
+    }
+  }
+</style>
+</head>
+<body>
+
+  <!-- Interactive Toolbar -->
+  <div class="toolbar">
+    <div class="toolbar-brand">
+      <button id="btn-back-to-job" class="btn btn-secondary" style="background: #1e293b; border: 1px solid #475569;" title="Return to Job Application Form">
+        ⬅️ Back to Job Application
+      </button>
+      <span>📄 Cover Letter Studio & Full-Page Review</span>
+      <span class="anti-slop-badge">🛡️ Engineer-Tone Enforced</span>
+      <span id="toast" class="status-toast"></span>
+    </div>
+    <div class="toolbar-actions">
+      <button id="btn-fill-and-return" class="btn btn-primary" title="Insert this Cover Letter directly into the job application form and return">
+        ⚡ Fill into Form & Return
+      </button>
+      <button id="btn-toggle-edit" class="btn btn-secondary" title="Click to edit text directly on the letter">
+        ✏️ Edit Directly on Letter
+      </button>
+      <button id="btn-copy" class="btn btn-secondary" title="Copy full letter text">
+        📋 Copy Text
+      </button>
+      <button id="btn-print" class="btn btn-accent" title="Print or Save as PDF (Ctrl+P)">
+        🖨️ Save as PDF / Print
+      </button>
+    </div>
+  </div>
+
+  <div class="studio-layout">
+    <!-- Left Sidebar: Direct Feedback & Guidance -->
+    <div class="studio-sidebar">
+      
+      <!-- Guidance / Feedback Prompt Card -->
+      <div class="panel-card">
+        <div class="panel-title">
+          <span>💡 Give Feedback & Hints</span>
+        </div>
+        <div class="hint-box">
+          <strong>Write like an Engineer:</strong> Clear, concise facts about your technical stack and automated testing. No AI clichés.
+        </div>
+        
+        <div>
+          <label style="font-size: 11px; color: #94a3b8; display:block; margin-bottom: 4px;">Target Role & Company:</label>
+          <input type="text" id="target-role-company" class="feedback-input" placeholder="e.g. Senior Software Engineer at Tech Corp">
+        </div>
+
+        <div>
+          <label style="font-size: 11px; color: #94a3b8; display:block; margin-bottom: 4px;">Feedback / Changes Desired:</label>
+          <textarea id="user-hint-text" class="feedback-textarea" placeholder="e.g. Highlight test automation, keep it concise, 3 crisp paragraphs..."></textarea>
+        </div>
+
+        <button id="btn-apply-hints" class="btn btn-primary" style="width: 100%; justify-content: center;">
+          ✨ Apply Feedback & Regenerate
+        </button>
+      </div>
+
+      <!-- Anti-Slop QA Rules Card -->
+      <div class="panel-card">
+        <div class="panel-title">
+          <span>🚫 Banned AI Expressions</span>
+          <span style="font-size: 11px; color: #ef4444;">Strictly Filtered</span>
+        </div>
+        <ul class="anti-slop-list">
+          <li>❌ <em>"Schwerpunkte meiner beruflichen Laufbahn"</em></li>
+          <li>❌ <em>"fundierte Erfahrung" / "wertvolle Erfahrungen"</em></li>
+          <li>❌ <em>"Über die Gelegenheit, mich und meine Erfahrungen..."</em></li>
+          <li>❌ <em>"begeistert", "perfekte Ergänzung", "Reise antreten"</em></li>
+          <li>❌ Em-dashes (— or --) and flowery academic prose</li>
+        </ul>
+      </div>
+
+      <!-- Quick Document & Profile Context -->
+      <div class="panel-card">
+        <div class="panel-title">
+          <span>👤 Candidate Profile Context</span>
+        </div>
+        <div id="candidate-profile-summary" style="font-size: 11.5px; color: #cbd5e1; line-height: 1.4;">
+          Loading candidate profile...
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Right Paper Sheet: DIN 5008 Layout -->
+    <div class="paper-wrapper">
+      <div class="page-container" id="letter-content">
+        <div class="header">
+          <div class="name" id="sender-name"></div>
+          <div class="contact-info" id="sender-contact"></div>
+        </div>
+
+        <div class="recipient" id="letter-recipient" contenteditable="false">
+          [Empfänger / Unternehmen]<br>
+          [Straße und Hausnummer]<br>
+          [PLZ und Ort]
+        </div>
+
+        <div class="date" id="letter-date">
+          <!-- Date auto-populated in DIN 5008 format -->
+        </div>
+
+        <div class="subject" id="letter-subject" contenteditable="false">
+          Bewerbung
+        </div>
+
+        <div id="letter-body"></div>
+
+        <div class="signature">
+          <span id="letter-closing" contenteditable="false">Sincerely,</span><br>
+          <div class="signature-name" id="signature-name"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="modules/job_session_manager.js"></script>
+  <script src="cover_letter_preview.js"></script>
+</body>
+</html>

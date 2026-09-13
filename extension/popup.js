@@ -34,6 +34,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   const btnDashboard = document.getElementById("btn-dashboard");
   const resultBox = document.getElementById("archive-result");
 
+  const jobStatusBadge = document.getElementById("job-status-badge");
+  const jobCapturedView = document.getElementById("job-captured-view");
+  const jobActiveTitle = document.getElementById("job-active-title");
+  const jobActiveCompany = document.getElementById("job-active-company");
+  const jobActiveMeta = document.getElementById("job-active-meta");
+  const jobViewUrl = document.getElementById("job-view-url");
+  const btnClearJob = document.getElementById("btn-clear-job");
+  const jobCaptureActionView = document.getElementById("job-capture-action-view");
+  const btnCaptureJob = document.getElementById("btn-capture-job");
+  const btnOpenClFull = document.getElementById("btn-open-cl-full");
+
   const tokenCard = document.getElementById("token-card");
   const tokenInput = document.getElementById("token-input");
   const btnSaveToken = document.getElementById("btn-save-token");
@@ -380,8 +391,134 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
 
-  // 4. Open Dashboard (P1 fix: clean URL without query token; auth via loopback/headers)
+  // 4. Pinned Job Context Handlers
+  async function renderJobContext() {
+    const manager = (typeof JobSessionManager !== "undefined" ? JobSessionManager : window.JobSessionManager);
+    if (!manager) return;
+    let activeJob = null;
+    try {
+      activeJob = await manager.getActiveJob();
+    } catch (e) {}
+
+    if (activeJob && activeJob.jobTitle) {
+      if (jobCapturedView) jobCapturedView.classList.remove("hidden");
+      if (jobCaptureActionView) jobCaptureActionView.classList.add("hidden");
+      if (jobActiveTitle) jobActiveTitle.textContent = activeJob.jobTitle;
+      if (jobActiveCompany) jobActiveCompany.textContent = activeJob.company ? `@ ${activeJob.company}` : "";
+
+      const minsAgo = Math.round((Date.now() - (activeJob.capturedTimestamp || Date.now())) / 60000);
+      const timeStr = minsAgo < 1 ? "Just now" : (minsAgo < 60 ? `${minsAgo}m ago` : `${Math.round(minsAgo / 60)}h ago`);
+      if (jobActiveMeta) {
+        jobActiveMeta.textContent = `${activeJob.platform ? `[${activeJob.platform}] ` : ""}${timeStr}${activeJob.location ? ` • ${activeJob.location}` : ""}`;
+      }
+      if (jobViewUrl) {
+        if (activeJob.jobUrl && activeJob.jobUrl.startsWith("http")) {
+          jobViewUrl.href = activeJob.jobUrl;
+          jobViewUrl.style.display = "inline";
+        } else {
+          jobViewUrl.style.display = "none";
+        }
+      }
+      if (jobStatusBadge) {
+        jobStatusBadge.className = "job-status-badge pinned";
+        jobStatusBadge.textContent = "✓ Pinned";
+      }
+    } else {
+      if (jobCapturedView) jobCapturedView.classList.add("hidden");
+      if (jobCaptureActionView) jobCaptureActionView.classList.remove("hidden");
+      if (jobStatusBadge) {
+        jobStatusBadge.className = "job-status-badge";
+        jobStatusBadge.textContent = "Ready to Pin";
+      }
+    }
+  }
+
+  if (btnCaptureJob) {
+    btnCaptureJob.addEventListener("click", async () => {
+      btnCaptureJob.disabled = true;
+      btnCaptureJob.textContent = "⏳ Pinning Job Description...";
+
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab || !tab.id) {
+          btnCaptureJob.disabled = false;
+          btnCaptureJob.textContent = "📌 Pin Job Description";
+          return;
+        }
+
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: [
+              "modules/job_session_manager.js",
+              "modules/job_extractor.js",
+              "content.js"
+            ]
+          });
+        } catch (e) {}
+
+        chrome.tabs.sendMessage(tab.id, { action: "extract_job_posting" }, async (resp) => {
+          btnCaptureJob.disabled = false;
+          btnCaptureJob.textContent = "📌 Pin Job Description";
+
+          if (chrome.runtime.lastError || !resp || !resp.success || !resp.jobData) {
+            resultBox.textContent = "Could not extract job description from current page.";
+            resultBox.className = "result-box error";
+            return;
+          }
+
+          const job = resp.jobData;
+          const manager = (typeof JobSessionManager !== "undefined" ? JobSessionManager : window.JobSessionManager);
+          if (manager) {
+            await manager.saveActiveJob(job);
+          }
+          resultBox.textContent = `✓ Pinned: ${job.jobTitle} at ${job.company}`;
+          resultBox.className = "result-box";
+          await renderJobContext();
+        });
+      } catch (err) {
+        btnCaptureJob.disabled = false;
+        btnCaptureJob.textContent = "📌 Pin Job Description";
+        resultBox.textContent = "Error pinning job: " + err.message;
+        resultBox.className = "result-box error";
+      }
+    });
+  }
+
+  if (btnClearJob) {
+    btnClearJob.addEventListener("click", async () => {
+      const manager = (typeof JobSessionManager !== "undefined" ? JobSessionManager : window.JobSessionManager);
+      if (manager) {
+        await manager.clearActiveJob();
+      }
+      resultBox.textContent = "Unpinned active job description.";
+      resultBox.className = "result-box";
+      await renderJobContext();
+    });
+  }
+
+  // 5. Open Cover Letter Studio
+  if (btnOpenClFull) {
+    btnOpenClFull.addEventListener("click", async () => {
+      let originTabId = "";
+      try {
+        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (activeTab && activeTab.id) {
+          originTabId = activeTab.id;
+        }
+      } catch (e) {}
+
+      const originParam = originTabId ? `?tabId=${originTabId}` : "";
+      const targetUrl = chrome.runtime.getURL(`cover_letter_preview.html${originParam}`);
+      chrome.tabs.create({ url: targetUrl });
+    });
+  }
+
+  // 6. Open Dashboard (P1 fix: clean URL without query token; auth via loopback/headers)
   btnDashboard.addEventListener("click", () => {
     chrome.tabs.create({ url: `${gatewayUrl}/dashboard` });
   });
+
+  // Render initial pinned job context on open
+  await renderJobContext();
 });

@@ -30,7 +30,41 @@
     </div>
   </div>
 
+  <!-- Pinned Job Context Card -->
+  <div id="job-context-card" class="job-context-card">
+    <div class="job-context-header">
+      <div class="job-context-title-row">
+        <span class="job-context-icon">📌</span>
+        <span id="job-card-heading" class="job-context-heading">Pinned Job</span>
+        <span id="job-status-badge" class="job-status-badge">Ready to Pin</span>
+      </div>
+    </div>
+    <div id="job-captured-view" class="job-captured-view hidden">
+      <div class="job-title-company">
+        <strong id="job-active-title" class="job-active-title">Software Engineer</strong>
+        <span id="job-active-company" class="job-active-company">Company</span>
+      </div>
+      <div class="job-meta-row">
+        <span id="job-active-meta" class="job-meta-text">Captured</span>
+        <div class="job-actions-row">
+          <a id="job-view-url" href="#" target="_blank" class="job-link-btn" title="Open original job posting">🔗 View Ad</a>
+          <button id="btn-clear-job" class="btn-clear-job" title="Unpin job session">✕</button>
+        </div>
+      </div>
+    </div>
+    <div id="job-capture-action-view" class="job-capture-action-view">
+      <button id="btn-capture-job" class="btn btn-secondary btn-sm" style="width: 100%;">
+        <span>📌 Pin Job Description</span>
+      </button>
+    </div>
+  </div>
+
   <div class="actions-section">
+    <button id="btn-open-cl-full" class="btn btn-accent">
+      <span class="btn-icon">📄</span>
+      <span>Cover Letter Studio (DIN 5008)</span>
+    </button>
+
     <button id="btn-archive" class="btn btn-primary">
       <span class="btn-icon">📸</span>
       <span>1-Click Archive Posting</span>
@@ -52,6 +86,7 @@
     <span>Strands Agents SDK &bull; Zero PII Leak</span>
   </div>
 
+  <script src="modules/job_session_manager.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

@@ -153,6 +153,77 @@
       return true;
     }
 
+    if (request.action === "extract_job_posting") {
+      const extractor = (typeof window.JobExtractor !== "undefined") ? window.JobExtractor : (typeof JobExtractor !== "undefined" ? JobExtractor : null);
+      if (extractor) {
+        const jobData = extractor.extractJobPosting();
+        sendResponse({ success: true, jobData });
+      } else {
+        const title = document.querySelector("h1")?.innerText?.trim() || document.title;
+        sendResponse({
+          success: true,
+          jobData: {
+            applicationId: `job--${Date.now()}`,
+            jobTitle: title,
+            company: "Company",
+            jobUrl: window.location.href,
+            jobDescriptionRaw: document.body ? document.body.innerText.slice(0, 8000) : "",
+            capturedDate: new Date().toLocaleDateString("de-DE"),
+            capturedTimestamp: Date.now(),
+            status: "CAPTURED",
+          }
+        });
+      }
+      return true;
+    }
+
+    if (request.action === "get_job_context") {
+      const extractor = (typeof window.JobExtractor !== "undefined") ? window.JobExtractor : (typeof JobExtractor !== "undefined" ? JobExtractor : null);
+      const jobData = extractor ? extractor.extractJobPosting() : null;
+      sendResponse({
+        success: true,
+        jobContext: jobData || {
+          jobTitle: document.querySelector("h1")?.innerText?.trim() || document.title,
+          company: "",
+          jobUrl: window.location.href,
+          jobDescriptionRaw: document.body ? document.body.innerText.slice(0, 8000) : "",
+        }
+      });
+      return true;
+    }
+
+    if (request.action === "fill_cover_letter_text") {
+      const text = request.text || "";
+      const allTextareas = Array.from(document.querySelectorAll("textarea, [contenteditable='true']"));
+      let targetEl = allTextareas.find(t => {
+        const ph = (t.placeholder || "").toLowerCase();
+        const nm = (t.name || t.id || "").toLowerCase();
+        const aria = (t.getAttribute("aria-label") || "").toLowerCase();
+        const combined = `${ph} ${nm} ${aria}`;
+        return combined.includes("cover") || combined.includes("anschreiben") || combined.includes("motivation") ||
+               combined.includes("message") || combined.includes("nachricht") || combined.includes("fit") ||
+               combined.includes("why you");
+      });
+      if (!targetEl && allTextareas.length > 0) targetEl = allTextareas[0];
+
+      if (targetEl) {
+        if (targetEl.isContentEditable) {
+          targetEl.innerText = text;
+        } else {
+          targetEl.value = text;
+        }
+        targetEl.dispatchEvent(new Event("input", { bubbles: true }));
+        targetEl.dispatchEvent(new Event("change", { bubbles: true }));
+        try {
+          targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
+        } catch (e) {}
+        sendResponse({ success: true, filled: true });
+      } else {
+        sendResponse({ success: true, filled: false, note: "Text copied to clipboard" });
+      }
+      return true;
+    }
+
     if (request.action === "autofill_form") {
       performAutofill(request, sendResponse);
       return true;

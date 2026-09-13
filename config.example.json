@@ -25,6 +25,9 @@
     "gmail": {
       "enabled": true,
       "method": "mcp",
+      "folders": [
+        "INBOX"
+      ],
       "auto_tag_labels": {
         "parent": "JobSearch",
         "applications": "JobSearch/Applications",

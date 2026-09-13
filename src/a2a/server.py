@@ -21,6 +21,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Re
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.staticfiles import StaticFiles
 
 from src.a2a.protocol import A2ACapability, A2AEvent, TaskEnvelope, TaskResponse
 from src.core.config import AppConfig, load_config
@@ -352,6 +353,17 @@ def create_a2a_app(
         html_content = html_file.read_text(encoding="utf-8")
         return HTMLResponse(content=html_content)
 
+    @app.get("/studio", response_class=HTMLResponse)
+    async def get_cover_letter_studio() -> HTMLResponse:
+        p = Path("extension/cover_letter_preview.html")
+        if p.exists():
+            return HTMLResponse(content=p.read_text(encoding="utf-8"))
+        raise HTTPException(status_code=404, detail="Cover letter studio not found.")
+
+    ext_dir = Path("extension")
+    if ext_dir.exists():
+        app.mount("/extension", StaticFiles(directory=str(ext_dir)), name="extension")
+
     # 4. SSE Real-Time Event Stream
     @app.get("/a2a/v1/events", dependencies=[Depends(verify_token)])
     async def sse_events(request: Request) -> StreamingResponse:
@@ -457,13 +469,17 @@ def create_a2a_app(
         )
         return bundle
 
-    @app.post("/api/v1/cover_letter/generate", dependencies=[Depends(verify_token)])
+    @app.post("/api/v1/cover_letter/generate", dependencies=[Depends(verify_token_or_loopback)])
     async def generate_cover_letter_api(payload: Dict[str, Any]) -> Dict[str, Any]:
         company = payload.get("company", "Unternehmen")
         role = payload.get("role", "Software Engineer")
         lang = payload.get("lang", "de")
         job_description = payload.get("job_description") or payload.get("jobDescription")
         cv_text = payload.get("cv_text") or payload.get("cvText")
+        user_feedback = payload.get("user_feedback") or payload.get("userFeedback")
+        structured = bool(payload.get("structured", True))
+        recipient_address = payload.get("recipient") or payload.get("recipient_address", "")
+        contact_person = payload.get("contact_person", "")
 
         from src.tools.cover_letter_tool import CoverLetterEngine, CoverLetterGenerationError
         engine = CoverLetterEngine()
@@ -471,9 +487,13 @@ def create_a2a_app(
             return engine.generate(
                 company=company,
                 role=role,
+                recipient_address=recipient_address,
+                contact_person=contact_person,
                 lang=lang,
                 job_description=job_description,
                 cv_text=cv_text,
+                user_feedback=user_feedback,
+                structured=structured,
             )
         except CoverLetterGenerationError as e:
             raise HTTPException(status_code=422, detail=str(e))

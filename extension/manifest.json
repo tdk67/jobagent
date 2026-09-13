@@ -23,6 +23,8 @@
     {
       "matches": ["*://*/*"],
       "js": [
+        "modules/job_session_manager.js",
+        "modules/job_extractor.js",
         "modules/form_extractor.js",
         "modules/field_writer.js",
         "modules/document_uploader.js",
@@ -33,6 +35,12 @@
       "run_at": "document_idle",
       "all_frames": true,
       "match_about_blank": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["cover_letter_preview.html"],
+      "matches": ["<all_urls>"]
     }
   ]
 }

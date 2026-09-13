@@ -5,7 +5,7 @@ Candidate Background:
 {profile_context}
 
 Target Position: {role_display} at {comp_display}
-{job_description_context}
+{job_description_context}{user_guidance_context}
 
 STRICT ANTI-AI-SLOP RULES:
 - FORBIDDEN expressions:

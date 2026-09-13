@@ -56,10 +56,11 @@ class EmailIngestEngine:
                         "adapter will fetch nothing",
                     )
                 else:
+                    gmail_folders = getattr(email_cfg.gmail, "folders", None) or ["INBOX"]
                     self.adapters.append(
                         GmailMcpAdapter(
                             mcp_client=mcp_client,
-                            search_query="Bewerbung OR Interview OR Application",
+                            folders=gmail_folders,
                         )
                     )
 
