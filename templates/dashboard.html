@@ -293,6 +293,48 @@
       border-bottom: 1px solid var(--surface-border);
     }
 
+    th.sortable {
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    th.sortable:hover {
+      background: #1e293b;
+      color: #ffffff;
+    }
+
+    th.sortable .sort-arrow {
+      display: inline-block;
+      margin-left: 6px;
+      font-size: 11px;
+      color: var(--text-muted);
+      opacity: 0.5;
+    }
+
+    th.sortable.sorted-asc .sort-arrow,
+    th.sortable.sorted-desc .sort-arrow {
+      opacity: 1;
+      color: #60a5fa;
+      font-weight: 800;
+    }
+
+    .sort-dropdown {
+      background: #0f172a;
+      color: var(--text-main);
+      border: 1px solid var(--surface-border);
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 13px;
+      outline: none;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+
+    .sort-dropdown:focus {
+      border-color: var(--primary);
+    }
+
     td {
       padding: 16px 20px;
       border-bottom: 1px solid var(--surface-border);
@@ -377,33 +419,56 @@
       border-color: rgba(99, 102, 241, 0.3);
     }
 
-    .location-tag {
+    .location-text {
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      font-size: 12px;
-      color: #cbd5e1;
+      font-size: 12.5px;
+      color: var(--text-muted);
+      font-weight: 400;
     }
 
-    .location-tag.remote {
-      color: #34d399;
-      background: rgba(16, 185, 129, 0.1);
+    .badge-had-interview {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
       padding: 2px 7px;
       border-radius: 5px;
+      font-size: 10.5px;
+      font-weight: 600;
+      color: #34d399;
+      background: rgba(16, 185, 129, 0.12);
       border: 1px solid rgba(16, 185, 129, 0.25);
     }
 
+
     .email-content-box a, .email-body-link {
       color: #38bdf8;
-      text-decoration: underline;
-      text-underline-offset: 3px;
-      word-break: break-all;
-      transition: color 0.15s ease;
+      background: rgba(56, 189, 248, 0.1);
+      padding: 1px 7px;
+      border-radius: 5px;
+      text-decoration: none;
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      max-width: 420px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      vertical-align: middle;
+      transition: all 0.15s ease;
+      cursor: pointer;
     }
 
     .email-content-box a:hover, .email-body-link:hover {
-      color: #7dd3fc;
-      text-decoration: underline;
+      color: #ffffff;
+      background: rgba(56, 189, 248, 0.22);
+      border-color: #38bdf8;
+      text-decoration: none;
+      transform: translateY(-1px);
     }
 
     /* ── Slide-Over / Modal Email Viewer ── */
@@ -656,7 +721,6 @@
             <p class="scheduler-subtitle" id="schedulerSubtitle">Outlook Desktop (MAPI) &bull; Gmail MCP &bull; Connected</p>
           </div>
         </div>
-        <div class="scheduler-controls">
           <div class="scheduler-interval">
             <label for="schedulePresetSelect">Cadence:</label>
             <select id="schedulePresetSelect" onchange="onSchedulePresetChange()">
@@ -667,6 +731,21 @@
               <option value="interval_15">Every 15 min (Fast)</option>
               <option value="custom">Custom Schedule...</option>
             </select>
+          </div>
+          <div class="scheduler-interval">
+            <label for="ingestRangeSelect">Range:</label>
+            <select id="ingestRangeSelect" onchange="onIngestRangeChange()">
+              <option value="7" selected>Past Week (7 Days)</option>
+              <option value="14">Past 14 Days</option>
+              <option value="30">Past 30 Days</option>
+              <option value="90">Past 90 Days</option>
+              <option value="all">All Available</option>
+              <option value="custom">Custom Date...</option>
+            </select>
+          </div>
+          <div id="customDateRangeBox" style="display: none; align-items: center; gap: 6px;">
+            <label for="customStartDate" style="font-size: 12px; color: var(--text-muted);">From:</label>
+            <input type="date" id="customStartDate" style="background: #0f172a; border: 1px solid var(--surface-border); color: #fff; padding: 4px 8px; border-radius: 6px; font-size: 12px;">
           </div>
           <button type="button" class="btn-run-triage" id="btnRunTriage" onclick="triggerIngestNow()">
             <span id="triggerBtnIcon">⚡</span>
@@ -716,22 +795,34 @@
     <div class="table-section">
       <div class="table-header">
         <h2>Logged Applications ({{ total_count }})</h2>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <label for="sortSelect" style="font-size: 13px; color: var(--text-muted);">Sort by:</label>
+          <select id="sortSelect" class="sort-dropdown" onchange="applySortFromSelect(this.value)">
+            <option value="date-desc" selected>Date (Most recent first)</option>
+            <option value="date-asc">Date (Oldest first)</option>
+            <option value="company-asc">Company (A–Z)</option>
+            <option value="company-desc">Company (Z–A)</option>
+            <option value="role-asc">Job Title (A–Z)</option>
+            <option value="role-desc">Job Title (Z–A)</option>
+            <option value="status-asc">Status</option>
+          </select>
+        </div>
       </div>
-      <table>
+      <table id="applicationsTable">
         <thead>
           <tr>
-            <th>#</th>
-            <th>Company</th>
-            <th>Role</th>
-            <th>Date</th>
+            <th style="width: 50px;">#</th>
+            <th class="sortable" id="th-company" onclick="toggleSort('company')" title="Sort by Company">Company <span class="sort-arrow" id="arrow-company">▲▼</span></th>
+            <th class="sortable" id="th-role" onclick="toggleSort('role')" title="Sort by Job Title">Role <span class="sort-arrow" id="arrow-role">▲▼</span></th>
+            <th class="sortable sorted-desc" id="th-date" onclick="toggleSort('date')" title="Sort by Application Date">Date <span class="sort-arrow" id="arrow-date">▼</span></th>
             <th>Channel</th>
             <th>Location</th>
-            <th>Status</th>
+            <th class="sortable" id="th-status" onclick="toggleSort('status')" title="Sort by Status">Status <span class="sort-arrow" id="arrow-status">▲▼</span></th>
           </tr>
         </thead>
-        <tbody>
+        <tbody id="applicationsTbody">
           {% for app in applications %}
-          <tr>
+          <tr data-company="{{ app.company | lower }}" data-role="{{ app.role | lower }}" data-date="{{ app.raw_date }}" data-status="{{ app.status | lower }}">
             <td>{{ app.index }}</td>
             <td>
               <strong>{{ app.company }}</strong>
@@ -743,7 +834,21 @@
                 </div>
               {% endif %}
             </td>
-            <td>{{ app.role }}</td>
+            <td>
+              <div>{{ app.role }}</div>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px;">
+                {% if app.job_url %}
+                  <a href="{{ app.job_url }}" target="_blank" rel="noopener noreferrer" title="Open job posting and apply" style="display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 8px; border-radius: 6px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; text-decoration: none; border: 1px solid rgba(59, 130, 246, 0.3);">
+                    🔗 Continue Application ↗
+                  </a>
+                {% endif %}
+                {% if app.notes and ("Archived:" in app.notes or ".md" in app.notes) %}
+                  <button type="button" onclick='openSavedJdModal({{ app.company | tojson }}, {{ app.role | tojson }}, {{ app.job_url | tojson }}, {{ app.notes | tojson }})' title="View archived job description and requirements" style="display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 8px; border-radius: 6px; background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); cursor: pointer;">
+                    💾 View Saved JD
+                  </button>
+                {% endif %}
+              </div>
+            </td>
             <td>{{ app.applied_date }}</td>
             <td>
               {% if app.source and app.source != "—" %}
@@ -756,8 +861,8 @@
             </td>
             <td>
               {% if app.location and app.location != "—" %}
-                <span class="location-tag {% if 'Remote' in app.location %}remote{% endif %}">
-                  📍 {{ app.location }}
+                <span class="location-text">
+                  {% if 'remote' in app.location | lower %}🌐 {% endif %}{{ app.location }}
                 </span>
               {% else %}
                 <span style="color: var(--text-muted);">—</span>
@@ -767,13 +872,19 @@
               {% if app.status == "Interview" %}
                 <span class="badge badge-interview">🎯 Interview</span>
               {% elif app.status == "Rejected" %}
-                <span class="badge badge-rejected">✕ Rejected</span>
+                <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px;">
+                  <span class="badge badge-rejected">✕ Rejected</span>
+                  {% if app.had_interview %}
+                    <span class="badge-had-interview" title="Interview completed prior to rejection">🎯 Had Interview</span>
+                  {% endif %}
+                </div>
               {% elif app.status == "Saved" %}
                 <span class="badge badge-saved">💾 Saved</span>
               {% else %}
                 <span class="badge badge-applied">⌛ Applied</span>
               {% endif %}
             </td>
+
           </tr>
           {% endfor %}
         </tbody>
@@ -816,6 +927,14 @@
             <span class="email-meta-key">Category:</span>
             <span class="email-meta-val" id="modalCategory">—</span>
           </div>
+          <div class="email-meta-row" id="modalConfidenceRow" style="display: none;">
+            <span class="email-meta-key">Confidence:</span>
+            <span class="email-meta-val" id="modalConfidence">—</span>
+          </div>
+          <div class="email-meta-row" id="modalReasoningRow" style="display: none; align-items: flex-start;">
+            <span class="email-meta-key">AI Reasoning:</span>
+            <span class="email-meta-val" id="modalReasoning" style="color: #93c5fd; font-style: italic; line-height: 1.4;">—</span>
+          </div>
         </div>
 
         <div class="email-content-box" id="modalBodyText">Loading message body...</div>
@@ -823,10 +942,10 @@
 
       <div class="email-modal-footer">
         <div class="email-modal-footer-status">
-          <span class="status-dot">●</span> Connected to Outlook Desktop
+          <span class="status-dot">●</span> JobAgent Email Correspondence Audit
         </div>
-        <button type="button" class="btn-outlook" id="btnOpenOutlook" onclick="triggerOpenInOutlook()">
-          🚀 Open in Outlook Desktop
+        <button type="button" class="btn btn-secondary email-modal-close" onclick="closeEmailModal()" style="padding: 7px 18px; font-size: 12.5px;">
+          ✕ Close
         </button>
       </div>
     </div>
@@ -952,14 +1071,43 @@
       }
     }
 
+    function onIngestRangeChange() {
+      const val = document.getElementById("ingestRangeSelect").value;
+      const box = document.getElementById("customDateRangeBox");
+      if (val === "custom") {
+        box.style.display = "flex";
+      } else {
+        box.style.display = "none";
+      }
+    }
+
     async function triggerIngestNow() {
       const btn = document.getElementById("btnRunTriage");
       btn.disabled = true;
       document.getElementById("triggerBtnText").textContent = "Scanning Inboxes...";
       document.getElementById("schedulerPulse").className = "scheduler-pulse busy";
 
+      const rangeVal = document.getElementById("ingestRangeSelect") ? document.getElementById("ingestRangeSelect").value : "7";
+      const payload = {};
+      if (rangeVal === "custom") {
+        const customDate = document.getElementById("customStartDate") ? document.getElementById("customStartDate").value : "";
+        if (customDate) {
+          payload.start_date = customDate;
+        } else {
+          payload.days_back = 7;
+        }
+      } else if (rangeVal === "all") {
+        payload.days_back = 0;
+      } else {
+        payload.days_back = parseInt(rangeVal, 10) || 7;
+      }
+
       try {
-        const res = await fetch("/api/v1/triage/run", { method: "POST" });
+        const res = await fetch("/api/v1/triage/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
         const data = await res.json();
         if (res.ok) {
           showToast(`✅ Ingest pass complete: ${data.total_scanned || 0} scanned, ${data.interviews_found || 0} interviews, ${data.rejections_found || 0} rejections.`);
@@ -1059,7 +1207,7 @@
         emails.forEach((em, idx) => {
           const btn = document.createElement("button");
           btn.className = `email-tab-btn ${idx === 0 ? 'active' : ''}`;
-          const cat = em.category ? em.category.replace('_', ' ') : `Email ${idx + 1}`;
+          const cat = em.category ? em.category.replace(/_/g, ' ') : `Email ${idx + 1}`;
           btn.textContent = `📧 ${idx + 1}. ${cat}`;
           btn.onclick = () => selectEmailTab(idx);
           tabsContainer.appendChild(btn);
@@ -1082,6 +1230,40 @@
       renderSelectedEmail();
     }
 
+    function shortenUrlDisplay(url) {
+      try {
+        let targetUrl = url;
+        // Decode Microsoft Safelinks wrapper to reveal the real human target
+        if (url.includes("safelinks.protection.outlook.com") && url.includes("url=")) {
+          const match = url.match(/[?&]url=([^&]+)/i);
+          if (match && match[1]) {
+            try {
+              targetUrl = decodeURIComponent(match[1]);
+            } catch (e) {}
+          }
+        }
+        const parsed = new URL(targetUrl.startsWith("http") ? targetUrl : `https://${targetUrl}`);
+        let host = parsed.hostname.replace(/^www\./i, "");
+        let path = (parsed.pathname || "").replace(/^\/+/, "");
+        if (!path) {
+          return `🔗 ${host}`;
+        }
+        if (path.length > 18) {
+          path = path.slice(0, 16) + "…";
+        }
+        let label = `${host}/${path}`;
+        if (label.length > 36) {
+          label = label.slice(0, 34) + "…";
+        }
+        return `🔗 ${label}`;
+      } catch (e) {
+        if (url.length > 32) {
+          return `🔗 ${url.slice(0, 30)}…`;
+        }
+        return `🔗 ${url}`;
+      }
+    }
+
     function formatEmailContent(rawText) {
       if (!rawText || !rawText.trim()) {
         return '<span style="color: var(--text-muted); font-style: italic;">(No email content recorded in database)</span>';
@@ -1098,7 +1280,8 @@
       const urlRegex = /(https?:\/\/[^\s<>"'`]+|www\.[^\s<>"'`]+)/gi;
       return escaped.replace(urlRegex, (url) => {
         const href = url.startsWith("www.") ? `https://${url}` : url;
-        return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="email-body-link">${url}</a>`;
+        const displayLabel = shortenUrlDisplay(url);
+        return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="email-body-link" title="${href}">${displayLabel}</a>`;
       });
     }
 
@@ -1110,6 +1293,28 @@
       document.getElementById("modalSender").textContent = em.sender_name ? `${em.sender_name} <${em.sender_email || ''}>` : (em.sender_email || "—");
       document.getElementById("modalDate").textContent = em.received_time || "—";
       document.getElementById("modalCategory").textContent = (em.category || "Application Correspondence").toUpperCase();
+
+      // Confidence Score Rendering
+      const confEl = document.getElementById("modalConfidence");
+      const confRow = document.getElementById("modalConfidenceRow");
+      if (em.confidence_score !== undefined && em.confidence_score !== null) {
+        let pct = Math.round(em.confidence_score > 1.0 ? em.confidence_score : em.confidence_score * 100);
+        confEl.innerHTML = `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11.5px; background: ${pct >= 90 ? 'rgba(52, 211, 153, 0.15)' : 'rgba(251, 191, 36, 0.15)'}; color: ${pct >= 90 ? '#34d399' : '#fbbf24'}; border: 1px solid ${pct >= 90 ? 'rgba(52, 211, 153, 0.3)' : 'rgba(251, 191, 36, 0.3)'};">${pct}%</span>`;
+        confRow.style.display = "flex";
+      } else {
+        confRow.style.display = "none";
+      }
+
+      // AI Reasoning Rendering
+      const reasonEl = document.getElementById("modalReasoning");
+      const reasonRow = document.getElementById("modalReasoningRow");
+      const reasonText = em.reasoning || em.action_taken || "";
+      if (reasonText && reasonText.trim() && reasonText !== "none" && !reasonText.startsWith("marked_")) {
+        reasonEl.textContent = reasonText;
+        reasonRow.style.display = "flex";
+      } else {
+        reasonRow.style.display = "none";
+      }
 
       const bodyEl = document.getElementById("modalBodyText");
       // Instant formatted local SQLite display from memory — zero wait, zero MAPI
@@ -1139,6 +1344,75 @@
       document.getElementById("emailModalOverlay").className = "email-modal-overlay";
     }
 
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    async function openSavedJdModal(company, role, jobUrl, notes) {
+      document.getElementById("modalCompanyTitle").textContent = company || "Saved Job Application";
+      document.getElementById("modalRoleSubtitle").textContent = (role || "Role Description") + " • Saved Job Details";
+
+      const tabsContainer = document.getElementById("modalEmailTabs");
+      tabsContainer.style.display = "none";
+
+      document.getElementById("modalSubject").textContent = role ? `${role} at ${company}` : "Saved Application";
+      document.getElementById("modalSender").textContent = company || "—";
+      document.getElementById("modalDate").textContent = "Archived Snapshot";
+      document.getElementById("modalCategory").textContent = "SAVED JOB SPECIFICATION";
+      document.getElementById("modalConfidenceRow").style.display = "none";
+      document.getElementById("modalReasoningRow").style.display = "none";
+
+      const bodyEl = document.getElementById("modalBodyText");
+      bodyEl.innerHTML = "<p style='color: var(--text-muted);'>Loading saved description...</p>";
+
+      let linkHeader = "";
+      if (jobUrl && jobUrl.trim()) {
+        linkHeader = `
+          <div style="margin-bottom: 14px; padding: 10px 14px; background: rgba(37, 99, 235, 0.15); border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 8px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+            <div style="min-width: 0; flex: 1;">
+              <div style="font-size: 10.5px; text-transform: uppercase; color: #93c5fd; font-weight: 700; letter-spacing: 0.5px;">Original Job Application URL</div>
+              <div style="font-size: 12px; color: #cbd5e1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px;">${escapeHtml(jobUrl)}</div>
+            </div>
+            <a href="${escapeHtml(jobUrl)}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; background: #2563eb; color: #ffffff; font-size: 12px; font-weight: 600; border-radius: 6px; text-decoration: none; white-space: nowrap; flex-shrink: 0;">
+              🔗 Continue Application ↗
+            </a>
+          </div>
+        `;
+      }
+
+      let archiveFile = "";
+      if (notes && notes.includes("Archived:")) {
+        const parts = notes.split("Archived:");
+        if (parts.length > 1) {
+          archiveFile = parts[1].trim();
+        }
+      }
+
+      if (archiveFile) {
+        try {
+          const res = await fetch(`/api/v1/archive/content?file=${encodeURIComponent(archiveFile)}`);
+          const data = await res.json();
+          if (data.status === "ok" && data.content) {
+            bodyEl.innerHTML = linkHeader + `<div style="font-family: inherit; line-height: 1.6; white-space: pre-wrap; font-size: 13.5px; color: var(--text-primary);">${escapeHtml(data.content)}</div>`;
+          } else {
+            bodyEl.innerHTML = linkHeader + `<div style="padding: 12px; background: rgba(255,255,255,0.03); border-radius: 6px;"><p style="margin: 0; font-size: 13px; color: var(--text-secondary);">${escapeHtml(notes || 'No offline snapshot recorded.')}</p></div>`;
+          }
+        } catch (e) {
+          bodyEl.innerHTML = linkHeader + `<div style="padding: 12px; background: rgba(255,255,255,0.03); border-radius: 6px;"><p style="margin: 0; font-size: 13px; color: var(--text-secondary);">${escapeHtml(notes || 'No offline snapshot recorded.')}</p></div>`;
+        }
+      } else {
+        bodyEl.innerHTML = linkHeader + `<div style="padding: 12px; background: rgba(255,255,255,0.03); border-radius: 6px;"><p style="margin: 0; font-size: 13px; color: var(--text-secondary);">${escapeHtml(notes || 'No additional notes or offline snapshot saved for this application.')}</p></div>`;
+      }
+
+      document.getElementById("emailModalOverlay").className = "email-modal-overlay open";
+    }
+
     async function triggerOpenInOutlook() {
       const em = activeEmails[activeEmailIndex];
       if (!em || !em.entry_id) {
@@ -1158,6 +1432,75 @@
       } catch (err) {
         showToast("❌ Could not connect to gateway to launch Outlook");
       }
+    }
+
+    // ── Table Sorting Logic ──
+    let currentSortCol = "date";
+    let currentSortDir = "desc";
+
+    function updateSortIndicators() {
+      ["date", "company", "role", "status"].forEach(col => {
+        const th = document.getElementById(`th-${col}`);
+        const arrow = document.getElementById(`arrow-${col}`);
+        if (!th || !arrow) return;
+        if (col === currentSortCol) {
+          th.className = `sortable sorted-${currentSortDir}`;
+          arrow.textContent = currentSortDir === "asc" ? "▲" : "▼";
+        } else {
+          th.className = "sortable";
+          arrow.textContent = "▲▼";
+        }
+      });
+      const sel = document.getElementById("sortSelect");
+      if (sel) {
+        sel.value = `${currentSortCol}-${currentSortDir}`;
+      }
+    }
+
+    function sortTable(col, dir) {
+      currentSortCol = col;
+      currentSortDir = dir;
+      updateSortIndicators();
+
+      const tbody = document.getElementById("applicationsTbody");
+      if (!tbody) return;
+
+      const rows = Array.from(tbody.querySelectorAll("tr"));
+      rows.sort((a, b) => {
+        let valA = a.getAttribute(`data-${col}`) || "";
+        let valB = b.getAttribute(`data-${col}`) || "";
+
+        if (col === "date") {
+          valA = valA.trim();
+          valB = valB.trim();
+          return dir === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        }
+
+        const cmp = valA.localeCompare(valB, undefined, { sensitivity: "base", numeric: true });
+        return dir === "asc" ? cmp : -cmp;
+      });
+
+      // Re-append rows in sorted order and dynamically update row number
+      rows.forEach((row, idx) => {
+        row.cells[0].textContent = idx + 1;
+        tbody.appendChild(row);
+      });
+    }
+
+    function toggleSort(col) {
+      if (currentSortCol === col) {
+        sortTable(col, currentSortDir === "asc" ? "desc" : "asc");
+      } else {
+        const defaultDir = col === "date" ? "desc" : "asc";
+        sortTable(col, defaultDir);
+      }
+    }
+
+    function applySortFromSelect(val) {
+      const parts = val.split("-");
+      const col = parts[0];
+      const dir = parts[1] || "asc";
+      sortTable(col, dir);
     }
 
     // Init scheduler status and polling on load

@@ -46,13 +46,15 @@ _RULES: Dict[str, Any] = _load_classification_rules()
 
 @dataclass
 class ClassificationResult:
-    category: str  # "interview_invitation", "application_confirmation", "rejection", "follow_up", "noise"
+    category: str  # "interview_invitation", "application_confirmation", "rejection", "follow_up", "noise", "verification"
     confidence: float
     matched_company: Optional[str] = None
     matched_role: Optional[str] = None
     meeting_link: Optional[str] = None
     suggested_date: Optional[str] = None
     explanation: str = ""
+    intent: Optional[str] = None
+    reasoning: Optional[str] = None
 
 
 class EmailClassifier:
@@ -125,6 +127,21 @@ class EmailClassifier:
         r"application submitted",
     ])
 
+    VERIFICATION_PATTERNS: List[str] = _RULES.get("verification_patterns", [
+        r"account verification",
+        r"candidate account verification",
+        r"one-time password",
+        r"verification passcode",
+        r"passcode is",
+        r"verification code",
+        r"bestätigungscode",
+        r"aktivierungslink",
+        r"e-mail-adresse bestätigen",
+        r"verify your email",
+        r"activate your account",
+        r"security code",
+    ])
+
     MEETING_LINK_PATTERNS: List[str] = _RULES.get("meeting_link_patterns", [
         r"https?://teams\.microsoft\.com/l/meetup-join/[^\s\"'>]+",
         r"https?://[a-zA-Z0-9-]+\.zoom\.us/j/[^\s\"'>]+",
@@ -158,6 +175,9 @@ class EmailClassifier:
         r"applying\s+to\s+",
         r"interest\s+in\s+",
         r"welcome\s+to\s+",
+        r"\bat\s+",
+        r"sent\s+to\s+",
+        r"viewed\s+by\s+",
     ])
 
     def __init__(self, applied_companies: Optional[Dict[str, Dict[str, Any]]] = None):
@@ -207,70 +227,131 @@ class EmailClassifier:
     def find_matching_company(self, text: str, sender_name: str, sender_email: str) -> Optional[str]:
         """Matches email against applied companies with sender identity verification (Anti-Phishing C1).
         
-        Security Rule: Never match a company solely because a third-party email body mentions it.
-        The sender's email address or sender display name must authenticate the company connection.
+        Security Rule: Never match a company solely because a third-party aggregator mentions it.
+        Aggregator platforms (LinkedIn, StepStone, Indeed) extract the candidate employer from subject.
         """
         s_email = (sender_email or "").lower().strip()
         s_name = (sender_name or "").lower().strip()
         s_domain = s_email.split("@")[-1] if "@" in s_email else ""
 
-        for comp_key, comp_data in self.applied_companies.items():
+        # Step 1: For job portal aggregators (LinkedIn, StepStone, Indeed, Join),
+        # extract candidate company from subject context (e.g. "...at Code Compass", "...sent to PRACYVA")
+        is_portal = any(p in s_domain for p in ["linkedin.com", "stepstone", "indeed", "join.com", "xing.com"])
+        if is_portal:
+            cand = self.extract_company_from_context(text, sender_name, sender_email)
+            if cand:
+                cand_clean = cand.strip().lower()
+                for comp_key, comp_data in self.applied_companies.items():
+                    if cand_clean == comp_key or re.search(rf"\b{re.escape(comp_key)}\b", cand_clean, re.IGNORECASE) or re.search(rf"\b{re.escape(cand_clean)}\b", comp_key, re.IGNORECASE):
+                        return comp_data.get("company", comp_key)
+                return cand
+
+        # Sort applied companies by length descending to match most specific name first (e.g. "DekaBank" before "Deka")
+        sorted_comps = sorted(self.applied_companies.items(), key=lambda x: len(x[0]), reverse=True)
+
+        # Step 2: Direct mention of an applied company in subject line or sender display name
+        subj_line = text.split("\n")[0] if "\n" in text else text
+        for comp_key, comp_data in sorted_comps:
+            if len(comp_key) >= 3:
+                # Word boundary match in subject line (e.g. "Your Application to Infosys", "Thanks for Applying to Infosys!")
+                if re.search(rf"\b{re.escape(comp_key)}\b", subj_line, re.IGNORECASE):
+                    return comp_data.get("company", comp_key)
+                # Word boundary match in sender display name (e.g. "InfosysTalentAcquisition", "Deka Recruiting")
+                if s_name and (re.search(rf"\b{re.escape(comp_key)}\b", s_name, re.IGNORECASE) or (len(comp_key) >= 4 and comp_key in re.sub(r"[^\w]", "", s_name))):
+                    return comp_data.get("company", comp_key)
+
+        # Step 3: Check authentic direct company domains or trusted recruitment ATS platforms
+        domain_labels = [re.sub(r"[^\w]", "", part.lower()) for part in s_domain.split(".") if part]
+        for comp_key, comp_data in sorted_comps:
             canonical_name = comp_data.get("company", comp_key)
             clean_comp = re.sub(r"[^\w]", "", comp_key)
             if len(clean_comp) < 3:
                 continue
 
-            # 1. Company name in sender domain (e.g. jobs@chrono24.com, hr@de.chrono24.de)
-            # Strictly checks s_domain to reject local-part spoofing (e.g. chrono24-careers@evil.biz)
-            if s_domain and clean_comp in re.sub(r"[^\w]", "", s_domain):
-                return canonical_name
-
-            # 2. Known trusted recruitment ATS platforms (e.g. Greenhouse, Personio, Workday)
-            # Where ATS relays mail on behalf of the company
+            # Known trusted recruitment ATS platforms (e.g. Greenhouse, Personio, Workday, BrassRing)
+            # where ATS relays mail on behalf of the company
             if any(s_domain == ats or s_domain.endswith(f".{ats}") for ats in self.KNOWN_ATS_DOMAINS):
                 clean_email_user = re.sub(r"[^\w]", "", s_email.split("@")[0]) if "@" in s_email else ""
                 clean_name = re.sub(r"[^\w]", "", s_name)
-                if clean_comp in clean_email_user or clean_comp in clean_name:
+                word_match = bool(re.search(rf"\b{re.escape(comp_key)}\b", s_name, re.IGNORECASE))
+                subdomain_match = bool(s_domain.startswith(f"{clean_comp}.") or s_domain.startswith(f"{comp_key}."))
+                token_match = (len(clean_comp) >= 4 and (clean_comp in clean_email_user or clean_comp in clean_name))
+                if word_match or subdomain_match or token_match:
                     return canonical_name
 
-            # 3. Check application job_url domain cross-reference
-            job_url = (comp_data.get("job_url") or "").lower()
-            if job_url and s_domain:
-                try:
-                    from urllib.parse import urlparse
-                    job_host = (urlparse(job_url).hostname or "").lower()
-                    if s_domain in job_host or (len(s_domain) >= 5 and s_domain.split(".")[0] in job_host):
-                        return canonical_name
-                except Exception:
-                    pass
+            # Direct company sender domain (e.g. jobs@chrono24.com, hr@de.chrono24.de)
+            # Strict domain label match: NEVER match a 3-character company name like "ing" as a loose substring
+            # inside unrelated words like "brassring.com", "booking.com", "springer.com"!
+            if s_domain and not any(agg in s_domain for agg in ["linkedin", "stepstone", "indeed", "xing", "gmail", "outlook", "yahoo", "hotmail"]):
+                is_label_match = (
+                    clean_comp in domain_labels
+                    or any(label.startswith(f"{clean_comp}-") or label.endswith(f"-{clean_comp}") or f"-{clean_comp}-" in label for label in domain_labels)
+                    or (len(clean_comp) >= 5 and any(label.startswith(clean_comp) for label in domain_labels))
+                )
+                if is_label_match:
+                    return canonical_name
 
         return None
 
     @classmethod
     def extract_company_from_context(cls, subject: str, sender_name: str = "", sender_email: str = "") -> Optional[str]:
         """Extracts candidate company name from subject or sender identity when bootstrapping an empty DB."""
-        prefix_pattern = "(?:" + "|".join(cls.COMPANY_CONTEXT_PREFIXES) + ")"
-        regex_pattern = rf'{prefix_pattern}([A-Za-z0-9\-_&äöüÄÖÜß. ]+?)(?:\s*[-/|!–]|\s+GmbH|\s+AG|\s+SE|\s+Germany|\s*$)'
-        m = re.search(regex_pattern, subject, re.IGNORECASE)
-        if m:
-            cand = m.group(1).strip()
-            if len(cand) >= 2 and cand.lower() not in ["uns", "ihnen", "dir", "team", "the"]:
+        from src.core.normalizer import is_noise_company
+
+        clean_subj = re.sub(r"[\U00010000-\U0010ffff]", "", subject).strip()
+
+        # 1. Check portal patterns: "to/as {role} at {company}"
+        m1 = re.search(r"(?:to|as)\s+(.+?)\s+at\s+([^–\-\|\n\r]+)", clean_subj, re.IGNORECASE)
+        if m1:
+            cand = m1.group(2).strip()
+            cand = re.sub(r"[\s\.\,\:\;\!\?]+$", "", cand).strip()
+            if len(cand) >= 2 and not is_noise_company(cand) and cand.lower() not in ["uns", "ihnen", "dir", "team", "the"]:
                 return cand
 
+        # 2. Check portal patterns: "sent to / viewed by / continue your application to {company}"
+        m2 = re.search(r"(?:sent to|viewed by|continue your application to)\s+([^–\-\|\n\r]+)", clean_subj, re.IGNORECASE)
+        if m2:
+            cand = m2.group(1).strip()
+            cand = re.sub(r"[\s\.\,\:\;\!\?]+$", "", cand).strip()
+            if len(cand) >= 2 and not is_noise_company(cand) and cand.lower() not in ["uns", "ihnen", "dir", "team", "the"]:
+                return cand
+
+        # Strip trailing reference/job IDs like "AF:0270436", "CRM:0100159", "Ref: 12345", "#1234"
+        clean_subj_no_ref = re.sub(r"\s+[A-Z]{1,5}:[0-9A-Z]+(?:\b|\s|$)", "", clean_subj, flags=re.IGNORECASE)
+
+        # 3. Generic prefix pattern
+        prefix_pattern = "(?:" + "|".join(cls.COMPANY_CONTEXT_PREFIXES) + ")"
+        regex_pattern = rf'{prefix_pattern}([A-Za-z0-9\-_&äöüÄÖÜß. ]+?)(?:\s*[-/|!–]|\s+GmbH|\s+AG|\s+SE|\s+Germany|\s*$)'
+        m = re.search(regex_pattern, clean_subj_no_ref, re.IGNORECASE)
+        if m:
+            cand = m.group(1).strip()
+            cand = re.sub(r"[\s\.\,\:\;\!\?]+$", "", cand).strip()
+            if len(cand) >= 2 and not is_noise_company(cand) and cand.lower() not in ["uns", "ihnen", "dir", "team", "the"]:
+                return cand
+
+        # 4. Sender name (if not a noise company/aggregator)
         clean_sender = sender_name.strip()
-        clean_sender = re.sub(r"^(?:Hiring-Team|Karriere-Team|Recruiting-Team|Team|Talent-Team)\s+von\s+", "", clean_sender, flags=re.IGNORECASE)
+        clean_sender = re.sub(r"^(?:Hiring-Team|Karriere-Team|Recruiting-Team|Team|Talent-Team|Webmailer)\s+(?:von\s+)?", "", clean_sender, flags=re.IGNORECASE)
         clean_sender = re.sub(r"\s*(?:Recruiting(?:\s+Team)?|HR\s+Team|Careers|Hiring\s+Team)$", "", clean_sender, flags=re.IGNORECASE)
         clean_sender = re.sub(r"\s*(?:GmbH|AG|SE|KG|Ltd|Inc\.?)$", "", clean_sender, flags=re.IGNORECASE).strip()
-        if len(clean_sender) >= 3 and not any(clean_sender.lower().startswith(b) for b in ["no-reply", "noreply", "donotreply", "recruiting"]):
+        if len(clean_sender) >= 3 and not is_noise_company(clean_sender) and not any(clean_sender.lower().startswith(b) for b in ["no-reply", "noreply", "donotreply"]):
             return clean_sender
 
+        # 5. Sender domain fallback (excluding aggregators and consumers)
         s_email = (sender_email or "").strip().lower()
         if "@" in s_email:
-            domain = s_email.split("@")[-1].split(".")[0]
-            if len(domain) >= 3 and domain not in ["gmail", "hotmail", "yahoo", "outlook", "greenhouse", "lever", "workday", "smartrecruiters"]:
+            user_part = s_email.split("@")[0]
+            domain_part = s_email.split("@")[-1]
+            domain = domain_part.split(".")[0]
+            if "myworkday" in domain_part or domain == "workday":
+                # For workday relay addresses like cgm@myworkday.com or ing@myworkday.com
+                if len(user_part) >= 2 and user_part not in ["recruiting", "noreply", "no-reply", "jobs", "hr", "careers"]:
+                    return user_part.upper() if len(user_part) <= 4 else user_part.capitalize()
+            elif len(domain) >= 3 and domain not in ["gmail", "hotmail", "yahoo", "outlook", "greenhouse", "lever", "workday", "myworkday", "smartrecruiters", "linkedin", "arbeitsagentur", "stepstone", "indeed", "xing"]:
                 return domain.capitalize()
 
         return None
+
 
     def classify_with_llm(
         self,
@@ -319,32 +400,58 @@ class EmailClassifier:
                     cleaned_json = cleaned_json.split("```")[1].split("```")[0].strip()
 
                 parsed = json.loads(cleaned_json)
-                category = parsed.get("category", "noise")
-                if category not in {"interview_invitation", "application_confirmation", "rejection", "follow_up", "noise"}:
-                    return None
+                intent = parsed.get("intent")
+                category = parsed.get("category")
+                if not category and intent:
+                    intent_to_cat = {
+                        "rejection": "rejection",
+                        "interview": "interview_invitation",
+                        "acknowledgement": "application_confirmation",
+                        "job_application": "application_confirmation",
+                        "info_request": "follow_up",
+                        "email_verification": "verification",
+                        "other": "noise",
+                    }
+                    category = intent_to_cat.get(intent, "noise")
+                elif not category:
+                    category = "noise"
+
+                if category not in {"interview_invitation", "application_confirmation", "rejection", "follow_up", "noise", "verification"}:
+                    category = "noise"
 
                 validated_link = self.extract_meeting_link(parsed.get("meeting_link") or "")
                 extracted_comp = parsed.get("matched_company") or None
-                expl = parsed.get("explanation", "Classified via Gemini LLM")
+                reasoning = parsed.get("reasoning") or parsed.get("explanation") or "Classified via Gemini LLM"
 
                 # Anti-Phishing: verify company authenticity for interview invitations
                 if category == "interview_invitation":
                     verified_comp = self.find_matching_company(f"{subject}\n{body}", sender_name, sender_email)
                     if not verified_comp:
                         category = "follow_up"
-                        expl = "Unverified sender claiming interview; downgraded to follow_up for safety"
+                        reasoning = "Unverified sender claiming interview; downgraded to follow_up for safety"
                         extracted_comp = None
                     else:
                         extracted_comp = verified_comp
 
+                # Normalize confidence to float between 0.0 and 1.0
+                raw_conf = parsed.get("confidence", 0.95)
+                try:
+                    conf_val = float(raw_conf)
+                    if conf_val > 1.0:
+                        conf_val = conf_val / 100.0
+                except (ValueError, TypeError):
+                    conf_val = 0.95
+
                 return ClassificationResult(
                     category=category,
-                    confidence=float(parsed.get("confidence", 0.85)),
+                    confidence=conf_val,
                     matched_company=extracted_comp,
                     matched_role=parsed.get("matched_role") or None,
                     meeting_link=validated_link,
                     suggested_date=parsed.get("suggested_date") or None,
-                    explanation=expl,
+                    explanation=reasoning,
+                    intent=intent or category,
+                    reasoning=reasoning,
                 )
             except Exception as e:
                 log.warning("Attempt %d: Failed to parse Gemini LLM classification response: %s", attempt + 1, e)
@@ -371,11 +478,10 @@ class EmailClassifier:
         enable_llm_fallback: bool = False,
     ) -> ClassificationResult:
         full_text = f"{subject}\n{body}".lower()
+
         meeting_link = self.extract_meeting_link(f"{subject} {body}")
         matched_company = self.find_matching_company(full_text, sender_name, sender_email)
         matched_role = None
-        if matched_company and matched_company.lower() in self.applied_companies:
-            matched_role = self.applied_companies[matched_company.lower()].get("role")
 
         # 1. Filter out known sales/marketing noise
         for noise in self.NOISE_KEYWORDS:
@@ -384,6 +490,8 @@ class EmailClassifier:
                     category="noise",
                     confidence=0.90,
                     explanation=f"Discarded noise/marketing containing keyword: {noise}",
+                    intent="other",
+                    reasoning=f"Discarded noise/marketing containing keyword: {noise}",
                 )
 
         # 2. Check for interview invitation (Highest priority actionable event)
@@ -398,14 +506,24 @@ class EmailClassifier:
                 is_interview_signal = True
 
         if is_interview_signal:
-            # Strong verification: if applied companies are tracked, require authenticated company to avoid phishing (Anti-Phishing C1)
-            if self.applied_companies and not matched_company:
+            # Strong verification: if applied companies are tracked, require authenticated sender to avoid phishing (Anti-Phishing C1)
+            sender_verified = True
+            if self.applied_companies and sender_email:
+                s_domain = sender_email.split("@")[-1].lower() if "@" in sender_email else ""
+                clean_comp = re.sub(r"[^\w]", "", (matched_company or "").lower())
+                is_comp_domain = bool(clean_comp and clean_comp in re.sub(r"[^\w]", "", s_domain))
+                is_ats_domain = any(s_domain == ats or s_domain.endswith(f".{ats}") for ats in self.KNOWN_ATS_DOMAINS)
+                is_portal = any(p in s_domain for p in ["linkedin.com", "stepstone", "indeed", "join.com", "xing.com"])
+                if not (is_comp_domain or is_ats_domain or is_portal):
+                    sender_verified = False
+
+            if self.applied_companies and (not matched_company or not sender_verified):
                 return ClassificationResult(
                     category="follow_up",
                     confidence=0.45,
                     matched_company=None,
                     matched_role=None,
-                    meeting_link=meeting_link,
+                    meeting_link=None,
                     explanation="Unverified sender with interview keywords; flagged for candidate review without CRM status mutation",
                 )
 
@@ -421,18 +539,41 @@ class EmailClassifier:
                 explanation=f"Detected interview invitation signal{' from ' + matched_company if matched_company else ''}",
             )
 
+        # Check for explicit automated confirmation markers
+        is_explicit_confirmation = bool(re.search(
+            r"automatisierte\s+eingangsbestätigung|übermittlung\s+ihrer\s+bewerbungsunterlagen",
+            full_text,
+            flags=re.IGNORECASE,
+        ))
+
         # 3. Check for rejection
+        is_rejection_signal = False
+        rejection_explanation = "Detected job rejection phrase"
         for pat in self.REJECTION_PATTERNS:
-            if re.search(pat, full_text, flags=re.IGNORECASE):
-                comp = matched_company or self.extract_company_from_context(subject, sender_name, sender_email)
-                return ClassificationResult(
-                    category="rejection",
-                    confidence=0.92,
-                    matched_company=comp,
-                    matched_role=matched_role,
-                    meeting_link=meeting_link,
-                    explanation="Detected job rejection phrase",
-                )
+            for match in re.finditer(pat, full_text, flags=re.IGNORECASE):
+                # Guard: Ignore conditional GDPR disclaimers (e.g. "wenn Sie uns diese personenbezogenen Daten nicht bereitstellen... nicht berücksichtigen können")
+                start_pos = max(0, match.start() - 150)
+                preceding_text = full_text[start_pos:match.start()]
+                if any(d in preceding_text for d in ["nicht bereitstellen", "wenn sie uns", "verweigerung der bereitstellung"]):
+                    continue
+                # If email is an explicit automated confirmation, require strong rejection phrase that cannot be a footer
+                if is_explicit_confirmation and "mitteilen" not in pat and "bedauern" not in pat and "entschieden" not in pat:
+                    continue
+                is_rejection_signal = True
+                break
+            if is_rejection_signal:
+                break
+
+        if is_rejection_signal:
+            comp = matched_company or self.extract_company_from_context(subject, sender_name, sender_email)
+            return ClassificationResult(
+                category="rejection",
+                confidence=0.92,
+                matched_company=comp,
+                matched_role=matched_role,
+                meeting_link=meeting_link,
+                explanation=rejection_explanation,
+            )
 
         # 4. Check for application confirmation
         for pat in self.CONFIRMATION_PATTERNS:
@@ -447,8 +588,23 @@ class EmailClassifier:
                     explanation="Detected application receipt confirmation",
                 )
 
+        # 4b. Check for account / email verification passcode
+        for pat in self.VERIFICATION_PATTERNS:
+            if re.search(pat, full_text, flags=re.IGNORECASE):
+                comp = matched_company or self.extract_company_from_context(subject, sender_name, sender_email)
+                return ClassificationResult(
+                    category="verification",
+                    confidence=0.95,
+                    matched_company=comp,
+                    matched_role=matched_role,
+                    meeting_link=meeting_link,
+                    explanation="Detected candidate account / email verification code",
+                )
+
         # 5. Check if sender/subject mentions career application context
-        if any(w in full_text for w in self.CAREER_CONTEXT_KEYWORDS) or meeting_link:
+        has_career_context = any(w in full_text for w in self.CAREER_CONTEXT_KEYWORDS) or bool(meeting_link)
+
+        if has_career_context:
             rule_result = ClassificationResult(
                 category="follow_up",
                 confidence=0.65,
@@ -465,8 +621,33 @@ class EmailClassifier:
                 explanation="No recruitment signal detected",
             )
 
-        # 6. Intelligent LLM Semantic Fallback for ambiguous career context (Rule 6: Intelligent Systems vs Brittle Heuristics)
-        if (enable_llm_fallback or rule_result.category == "follow_up") and os.getenv("GEMINI_API_KEY"):
+        # 6. ML Tier: offline, quota-free classification for ambiguous cases
+        # Only invoke for career-context emails (noise is filtered by rules)
+        if has_career_context:
+            try:
+                from src.tools.email.ml_classifier import MLEmailClassifier
+                ml = MLEmailClassifier.get_instance()
+                ml_result = ml.predict(subject, body, sender_email)
+                if ml_result:
+                    # Preserve company/role from rule-based matching
+                    if matched_company and not ml_result.matched_company:
+                        ml_result.matched_company = matched_company
+                    if matched_role and not ml_result.matched_role:
+                        ml_result.matched_role = matched_role
+                    if meeting_link and not ml_result.meeting_link:
+                        ml_result.meeting_link = meeting_link
+                    # Anti-phishing: verify unconfirmed interview invitations
+                    if ml_result.category == "interview_invitation" and not ml_result.matched_company:
+                        ml_result.category = "follow_up"
+                        ml_result.explanation = "ML detected interview signal but sender unverified; flagged for review"
+                    return ml_result
+            except ImportError:
+                log.debug("ML classifier not available (scikit-learn not installed)")
+            except Exception as e:
+                log.debug("ML classification error: %s", e)
+
+        # 7. LLM Semantic Fallback for very low-confidence cases (Rule 6: Intelligent Systems vs Brittle Heuristics)
+        if enable_llm_fallback and os.getenv("GEMINI_API_KEY"):
             llm_result = self.classify_with_llm(
                 subject=subject,
                 body=body,

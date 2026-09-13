@@ -16,6 +16,7 @@ Ensures:
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from src.core.storage import JobAgentStorage, UNKNOWN_ROLE
@@ -40,14 +41,18 @@ class ApplicationClusterer:
     ):
         self.storage = storage
         self.classifier = classifier or EmailClassifier()
+        self._comp_map: Optional[Dict[str, Dict[str, Any]]] = None
 
-    def _refresh_applied_companies(self) -> Dict[str, Dict[str, Any]]:
+    def _refresh_applied_companies(self, force: bool = False) -> Dict[str, Dict[str, Any]]:
+        if self._comp_map is not None and not force:
+            return self._comp_map
         apps = self.storage.list_applications()
         comp_map = {
             app["company"].strip().lower(): app
             for app in apps
             if app.get("company") and len(app["company"]) >= 2
         }
+        self._comp_map = comp_map
         self.classifier.set_applied_companies(comp_map)
         return comp_map
 
@@ -68,7 +73,23 @@ class ApplicationClusterer:
             enable_llm_fallback=enable_llm_fallback,
         )
 
-        is_bewerbung_folder = folder.lower() in ["bewerbung", "bewerbungen", "applications"]
+        effective_folder = (getattr(record, "folder", None) or folder).strip()
+        is_inbox_folder = effective_folder.lower() == "inbox"
+        is_bewerbung_folder = effective_folder.lower() in ["bewerbung", "bewerbungen", "applications"]
+
+        # USER BUSINESS RULE:
+        # In folder "Inbox", check ONLY for genuine interview requests/invitations.
+        # Non-interview emails in Inbox (newsletters, portal updates, general notifications like Bundesagentur)
+        # must be discarded as noise, never creating an application or polluting the application ledger.
+        if is_inbox_folder and classification.category != "interview_invitation":
+            return {
+                "entry_id": record.entry_id,
+                "category": "noise",
+                "company": None,
+                "role": None,
+                "application_id": None,
+                "interview_alert": None,
+            }
 
         # Extract & normalize candidate company
         cand_company = classification.matched_company
@@ -97,10 +118,15 @@ class ApplicationClusterer:
             # Normalize role
             canon_role = normalize_role_title(classification.matched_role)
             if not canon_role:
+                # Check for portal pattern "to {role} at {company}"
+                m_role = re.search(r"(?:to|as)\s+(.+?)\s+at\s+", record.subject, re.IGNORECASE)
+                if m_role:
+                    canon_role = normalize_role_title(m_role.group(1).strip())
+
+            if not canon_role:
                 from src.core.storage import UNKNOWN_ROLE
                 from src.tools.role_extractor import extract_role_from_context
-                import re
-                cand_role = extract_role_from_context(record.subject, record.body)
+                cand_role = extract_role_from_context(record.subject, record.body, use_llm=enable_llm_fallback)
                 if cand_role and cand_role != UNKNOWN_ROLE:
                     cand_role = re.sub(r"\s+(?:bei|at|für|fuer)\s+.*$", "", cand_role, flags=re.IGNORECASE)
                     canon_role = normalize_role_title(cand_role)
@@ -109,21 +135,54 @@ class ApplicationClusterer:
 
         app_id = None
         if canon_company:
-            # Check existing application in DB
-            existing_app = self.storage.get_application_by_company(canon_company)
+            from src.core.location_extractor import extract_location
+            cand_location = extract_location(record.subject, record.body, canon_role)
+
+            # Check existing application in DB with multi-application role + date + lifecycle disambiguation
+            existing_app = self.storage.get_application_by_company(
+                company=canon_company,
+                role=canon_role,
+                date=record.received_time,
+                category=effective_category,
+            )
             initial_status = "Applied"
             if effective_category == "interview_invitation":
                 initial_status = "Interview"
             elif effective_category == "rejection":
                 initial_status = "Rejected"
 
-            app_id = self.storage.upsert_application(
-                company=canon_company,
-                role=canon_role or UNKNOWN_ROLE,
-                applied_date=record.received_time,
-                status=initial_status,
-                source=f"Email ({folder})",
-            )
+            if existing_app:
+                app_id = existing_app["id"]
+                if effective_category == "interview_invitation":
+                    self.storage.update_application_status(app_id, "Interview")
+                elif effective_category == "rejection" and existing_app.get("status") != "Interview":
+                    self.storage.update_application_status(
+                        app_id, "Rejected", notes=f"Rejection email on {record.received_time}"
+                    )
+                if canon_role and not normalize_role_title(existing_app.get("role")):
+                    with self.storage._get_connection() as conn:
+                        conn.execute("UPDATE applications SET role = ? WHERE id = ?", (canon_role, app_id))
+                        conn.commit()
+                if cand_location and (not existing_app.get("location") or existing_app.get("location") == "—"):
+                    with self.storage._get_connection() as conn:
+                        conn.execute("UPDATE applications SET location = ? WHERE id = ?", (cand_location, app_id))
+                        conn.commit()
+            else:
+                app_id = self.storage.upsert_application(
+                    company=canon_company,
+                    role=canon_role or UNKNOWN_ROLE,
+                    applied_date=record.received_time,
+                    status=initial_status,
+                    source=f"Email ({effective_folder})",
+                    location=cand_location,
+                )
+                if self._comp_map is not None:
+                    self._comp_map[canon_company.strip().lower()] = {
+                        "id": app_id,
+                        "company": canon_company,
+                        "role": canon_role or UNKNOWN_ROLE,
+                    }
+                    self.classifier.set_applied_companies(self._comp_map)
 
         # Record email interaction with traceability link to canonical application
         self.storage.record_email_interaction(
@@ -137,6 +196,8 @@ class ApplicationClusterer:
             application_id=app_id,
             confidence_score=classification.confidence,
             action_taken=classification.explanation,
+            reasoning=classification.reasoning or classification.explanation,
+            intent=classification.intent or effective_category,
         )
 
         # Handle specific events

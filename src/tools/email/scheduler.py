@@ -86,6 +86,7 @@ class EmailIngestScheduler:
         schedule_time: str = "08:00",
         interval_minutes: int = 10080,
         enabled: bool = True,
+        default_days_back: int = 7,
     ):
         self.config = config or load_config()
         self.storage = storage or JobAgentStorage(self.config.storage.database_path)
@@ -96,6 +97,7 @@ class EmailIngestScheduler:
         self.schedule_day = schedule_day    # "monday", "tuesday", etc.
         self.schedule_time = schedule_time  # "08:00"
         self.interval_minutes = max(1, interval_minutes)
+        self.default_days_back = max(0, int(default_days_back))
 
         self._task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
@@ -172,18 +174,49 @@ class EmailIngestScheduler:
         )
         return self.get_status()
 
-    async def run_once(self) -> Dict[str, Any]:
-        """Executes a single triage and clustering pass under an async lock."""
+    async def run_once(
+        self,
+        days_back: Optional[int] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Executes a single triage and clustering pass under an async lock.
+        
+        Defaults to scanning emails from the past week (7 days) unless overridden.
+        Pass days_back=0 or start_date to customize or remove the window.
+        """
         async with self._lock:
             self.last_status = "running"
             self.last_error = None
             run_start = datetime.now(timezone.utc).isoformat()
-            log.info("Starting email ingestion triage run at %s...", run_start)
+
+            # Determine effective start date (default to past week)
+            effective_start = start_date
+            if not effective_start:
+                num_days = days_back if days_back is not None else self.default_days_back
+                if num_days and num_days > 0:
+                    effective_start = (datetime.now(timezone.utc) - timedelta(days=num_days)).strftime("%Y-%m-%d")
+
+            log.info(
+                "Starting email ingestion triage run at %s (window: %s to %s, limit: %s)...",
+                run_start,
+                effective_start or "ALL",
+                end_date or "NOW",
+                limit or "NONE",
+            )
 
             try:
-                # Run ingestion in worker thread to prevent blocking the async event loop
+                import functools
+
                 loop = asyncio.get_running_loop()
-                result = await loop.run_in_executor(None, self.engine.run_triage)
+                triage_call = functools.partial(
+                    self.engine.run_triage,
+                    limit=limit,
+                    start_date=effective_start,
+                    end_date=end_date,
+                )
+                result = await loop.run_in_executor(None, triage_call)
 
                 self.last_status = "success"
                 self.last_run_time = datetime.now(timezone.utc).isoformat()

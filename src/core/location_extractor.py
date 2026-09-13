@@ -23,8 +23,13 @@ HYBRID_PATTERN = re.compile(
 
 # Structural location field patterns commonly found in job descriptions and application summaries
 LOCATION_FIELD_PATTERN = re.compile(
-    r"(?:location|standort|ort|arbeitsort|city)\s*[:\-]\s*([A-Za-zÄÖÜäöüß0-9\s\-\/\(\),]{2,40})(?:\r|\n|;|\.|$)",
+    r"\b(?:location|standort|ort|arbeitsort|city)\s*[:\-]\s*([A-Za-zÄÖÜäöüß0-9\s\-\/\(\),]{2,40})(?:\r|\n|;|\.|$)",
     re.IGNORECASE,
+)
+
+# Postal code + city pattern (e.g., '10587 Berlin', 'D-60311 Frankfurt am Main')
+POSTAL_CITY_PATTERN = re.compile(
+    r"\b(?:D-)?(\d{5})\s+([A-ZÄÖÜ][a-zäöüß]+(?:(?:[\s\-]+(?:am|an\s+der|im|in\s+der)[\s\-]+|[\s\-])[A-ZÄÖÜ][a-zäöüß]+)*)\b"
 )
 
 
@@ -32,7 +37,7 @@ def extract_location(*text_sources: Optional[str]) -> Optional[str]:
     """Extracts location directly from text sources without relying on hardcoded city lists.
     
     Returns strings like:
-      - 'Frankfurt am Main' (extracted from 'Location: Frankfurt am Main')
+      - 'Frankfurt am Main' (extracted from 'Location: Frankfurt am Main' or '60311 Frankfurt am Main')
       - 'Berlin (Remote)'
       - 'Remote'
       - 'Hybrid'
@@ -54,6 +59,14 @@ def extract_location(*text_sources: Optional[str]) -> Optional[str]:
         # Ensure candidate is not a generic placeholder
         if len(candidate) >= 2 and candidate.lower() not in ("remote", "hybrid", "homeoffice", "n/a", "none"):
             found_location = candidate
+
+    # 2. Fall back to postal code / address structure matching
+    if not found_location:
+        postal_match = POSTAL_CITY_PATTERN.search(combined)
+        if postal_match:
+            city_candidate = postal_match.group(2).strip(" -,\t|Ι")
+            if len(city_candidate) >= 2 and city_candidate.lower() not in ("remote", "hybrid", "homeoffice", "germany", "deutschland"):
+                found_location = city_candidate
 
     # 2. Combine extracted text with work mode
     if found_location:

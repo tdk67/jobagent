@@ -112,6 +112,7 @@ class EmailRecord:
     received_time: str
     body: str
     preview: str = ""
+    folder: str = ""
     attachments: List[str] = field(default_factory=list)
 
 
@@ -265,6 +266,7 @@ class OutlookDesktopAdapter(BaseEmailAdapter):
                             received_time=rec_iso,
                             body=body,
                             preview=clean_preview,
+                            folder=getattr(folder, "Name", "Bewerbung"),
                         )
                     )
                     if limit and len(records) >= limit:

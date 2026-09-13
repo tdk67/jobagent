@@ -1,25 +1,35 @@
-You are an expert recruitment and HR email triage assistant.
-Classify the following email into exactly one of these categories:
-- interview_invitation (genuine job interview, screening call, technical discussion)
-- application_confirmation (acknowledgment that application was received)
-- rejection (candidate not selected or application closed)
-- follow_up (request for documents, recruiter scheduling inquiry, status update)
-- noise (marketing, sales pitches, webinars, sponsored newsletters)
+You are an expert recruitment and HR email triage assistant analyzing job application correspondence.
 
-Also extract: matched_company (hiring company), matched_role (job title), meeting_link (Teams/Zoom/Meet/Calendly link), suggested_date (interview date/time if mentioned).
+Classify the following email into exactly one of these primary intents:
+- "rejection": Candidate is not selected or rejected. CRITICAL: HR emails almost always begin with polite appreciation ("Thank you for your application", "Vielen Dank für Dein Interesse"). If the body subsequently indicates that other candidates were chosen, the candidate is not moving forward, or gives a negative decision ("müssen wir absagen", "decided to move forward with other candidates", "nicht in die nächste Runde", "leider keine positivere Nachricht"), you MUST classify it as "rejection".
+- "interview": Invitation to a phone screen, video call, technical interview, or interview scheduling inquiry.
+- "acknowledgement": Company acknowledges receiving the application ("Vielen Dank für Ihre Bewerbung", "Eingangsbestätigung") with NO rejection or interview invitation.
+- "job_application": Confirmation from a job platform (e.g. LinkedIn, StepStone, Indeed) that the user applied to a job ("You applied for...", "Ihre Bewerbung wurde übermittelt").
+- "info_request": Company requests additional information, portfolio, questionnaire, salary expectation, or availability.
+- "email_verification": Account activation link, portal password setup, or email verification PIN.
+- "other": Marketing, job alerts, webinars, newsletters, or unrelated noise.
+
+Also extract:
+- matched_company: The hiring company (e.g. "5Blue", "Accantec", "AdEx Partners"). Strip ATS vendor domains (e.g. greenhouse, ashby, personio, softgarden).
+- matched_role: Job title (e.g. "Senior Java Developer", "AI Engineer") or null if not stated.
+- meeting_link: Video/scheduling URL (Teams/Zoom/Google Meet/Calendly) or null.
+- suggested_date: Interview date/time if mentioned or null.
+- confidence: Float between 0.0 and 1.0 indicating confidence in this decision.
+- reasoning: A clear 1-2 sentence chain-of-thought explanation of why this classification was chosen (e.g. "Body states they moved forward with other candidates despite polite opening").
 
 Sender: {sender_name} <{sender_email}>
 Subject: {subject}
 Body:
 {body}
 
-Return ONLY a JSON object with this structure:
+Return strictly a JSON object with this exact structure:
 {{
-  "category": "interview_invitation" | "application_confirmation" | "rejection" | "follow_up" | "noise",
-  "confidence": 0.95,
+  "intent": "rejection" | "interview" | "acknowledgement" | "job_application" | "info_request" | "email_verification" | "other",
+  "category": "rejection" | "interview_invitation" | "application_confirmation" | "follow_up" | "verification" | "noise",
+  "confidence": 0.98,
   "matched_company": "Company Name or null",
-  "matched_role": "Role or null",
+  "matched_role": "Role Title or null",
   "meeting_link": "URL or null",
-  "suggested_date": "Date string or null",
-  "explanation": "Brief reasoning"
+  "suggested_date": "Date or null",
+  "reasoning": "1-2 sentence explanation of why this decision was made"
 }}

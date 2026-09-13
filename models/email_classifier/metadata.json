@@ -1,0 +1,59 @@
+{
+  "trained_at": "2026-09-13T21:26:49.642864+00:00",
+  "train_size": 1209,
+  "test_size": 806,
+  "accuracy": 0.8114,
+  "classes": [
+    "application_confirmation",
+    "follow_up",
+    "interview_invitation",
+    "noise",
+    "rejection",
+    "verification"
+  ],
+  "label_summary": {
+    "application_confirmation": {
+      "precision": 0.64,
+      "recall": 0.676,
+      "f1": 0.658,
+      "support": 71
+    },
+    "follow_up": {
+      "precision": 0.925,
+      "recall": 0.706,
+      "f1": 0.801,
+      "support": 385
+    },
+    "interview_invitation": {
+      "precision": 0.4,
+      "recall": 0.5,
+      "f1": 0.444,
+      "support": 4
+    },
+    "noise": {
+      "precision": 0.795,
+      "recall": 0.97,
+      "f1": 0.874,
+      "support": 300
+    },
+    "rejection": {
+      "precision": 0.621,
+      "recall": 0.911,
+      "f1": 0.739,
+      "support": 45
+    },
+    "verification": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "support": 1
+    }
+  },
+  "vectorizer": {
+    "ngram_range": [
+      1,
+      3
+    ],
+    "max_features": 30000
+  }
+}

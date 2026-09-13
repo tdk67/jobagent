@@ -34,8 +34,8 @@ def _load_extraction_rules() -> Dict[str, Any]:
             "webinar", "workshop", "coaching", "jobalert", "newsletter", "exklusiv"
         ],
         "fallback_role_patterns": [
-            r'(?:als|für die Position|Position:|für die Stelle:?)\s*["“\']?([^"”\'\n\r/]+)',
-            r'(?:role:|position:|job title:|application for|applied for:?|as a[n]?)\s*["“\']?([^"”\'\n\r/]+)',
+            r'(?:als|für die Position|Position:|für die Stelle:?)\s*["“\']?([^"”\'\n\r]+)',
+            r'(?:role:|position:|job title:|application for|applied for:?|as a[n]?)\s*["“\']?([^"”\'\n\r]+)',
         ],
     }
 
@@ -89,12 +89,15 @@ class RoleExtractor:
         """Extracts job role from context. Attempts LLM first, then falls back to rules.
         Uses normalized subject caching to avoid redundant LLM calls on large backfills.
         """
-        if not subject:
+        if not subject and not snippet:
             return None
 
-        cache_key = re.sub(r"\s+", " ", subject.strip().lower())
+        clean_subj = re.sub(r"\s+", " ", (subject or "").strip().lower())
+        clean_snip = re.sub(r"\s+", " ", (snippet or "")[:150].strip().lower())
+        cache_key = f"{clean_subj}::{clean_snip}"
         if cache_key in self._role_cache:
             return self._role_cache[cache_key]
+
 
         role: Optional[str] = None
 
@@ -113,6 +116,17 @@ class RoleExtractor:
                         if len(extracted) >= 3:
                             role = extracted
                             break
+                # If subject didn't contain role, search body snippet
+                if not role and snippet:
+                    for pattern in self.fallback_patterns:
+                        m = re.search(pattern, snippet[:4000], flags=re.IGNORECASE)
+                        if m:
+                            extracted = m.group(1).strip().strip("\"'“”.,:;").strip()
+                            # Clean trailing company/portal connector words
+                            extracted = re.sub(r"\s+(?:bei|und|at|for)\s+.*$", "", extracted, flags=re.IGNORECASE).strip()
+                            if len(extracted) >= 3 and not re.search(r"\b(?:alum|connections?|mutual|followers?)\b", extracted, re.I):
+                                role = extracted
+                                break
 
         self._role_cache[cache_key] = role
         return role

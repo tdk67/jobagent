@@ -29,3 +29,10 @@ pytest>=8.0.0
 # Optional Windows MAPI (Outlook Desktop)
 pywin32>=306; sys_platform == 'win32'
 
+# ML Email Classification (offline, no API quota)
+scikit-learn>=1.3.0
+joblib>=1.3.0
+
+# Training data preparation only (not required at runtime)
+pandas>=2.0.0; extra == "training"
+openpyxl>=3.1.0; extra == "training"

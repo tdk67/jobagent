@@ -9,7 +9,6 @@
     "workshop",
     "jobalert",
     "vertrieb und finanzkonzepte",
-    "match",
     "exklusiv",
     "sichern sie sich",
     "platz sichern",
@@ -22,7 +21,10 @@
     "lead generation"
   ],
   "fallback_role_patterns": [
-    "(?:als|für die Position|Position:|für die Stelle:?)\\s*[\"“']?([^\"”'\\n\\r/]+)",
-    "(?:role:|position:|job title:|application for|applied for:?|as a[n]?)\\s*[\"“']?([^\"”'\\n\\r/]+)"
+    "(?:als|für die Position|auf die Position|Position:|für die Stelle:?)\\s*[\"“']?([^\"”'\\n\\r]+)",
+    "(?:role:|position:|job title:|application for|applied for:?|as a[n]?)\\s*[\"“']?([^\"”'\\n\\r]+)",
+    "thank you for applying to\\s+[\"“']?([^\"”'\\n\\r\\.\\<\\(\\[]+)",
+    "application received:\\s*([^\\u2013\\u2014\\-\\n\\r\\t]+)",
+    "company-logo[^\\>]*\\>\\s*\\t?([^\\t\\n\\r\\<\\>]+?)\\s*(?:\\t|\\n)"
   ]
 }

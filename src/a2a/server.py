@@ -396,6 +396,17 @@ def create_a2a_app(
             raw_html=payload.get("html"),
         )
 
+    @app.get("/api/v1/archive/content")
+    async def get_archive_content(file: str = "") -> Dict[str, Any]:
+        """Safely returns the content of an archived job description snapshot."""
+        clean_name = Path(file).name
+        if not clean_name:
+            return {"status": "error", "content": "No archive file specified."}
+        p = (Path("data/archives") / clean_name).resolve()
+        if p.exists() and p.is_file() and p.parent.resolve() == Path("data/archives").resolve():
+            return {"status": "ok", "filename": clean_name, "content": p.read_text(encoding="utf-8", errors="replace")}
+        return {"status": "error", "filename": clean_name, "content": f"Archived description '{clean_name}' is not available on disk."}
+
     @app.get("/api/v1/qa", dependencies=[Depends(verify_token)])
     async def extension_query_qa(question: str) -> Dict[str, Any]:
         ans = svc.applications.get_qa_answer(question)
@@ -475,8 +486,14 @@ def create_a2a_app(
         return svc.emails.get_scheduler_status()
 
     @app.post("/api/v1/triage/run", dependencies=[Depends(verify_token_or_loopback)])
-    async def trigger_triage_run() -> Dict[str, Any]:
-        return await svc.emails.trigger_scheduler_run()
+    async def trigger_triage_run(payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        p = payload or {}
+        return await svc.emails.trigger_scheduler_run(
+            days_back=p.get("days_back"),
+            start_date=p.get("start_date"),
+            end_date=p.get("end_date"),
+            limit=p.get("limit"),
+        )
 
     @app.post("/api/v1/triage/config", dependencies=[Depends(verify_token_or_loopback)])
     async def update_triage_config(payload: Dict[str, Any]) -> Dict[str, Any]:

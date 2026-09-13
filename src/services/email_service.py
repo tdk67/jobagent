@@ -32,6 +32,8 @@ class EmailService:
             config=config,
         )
 
+        self._active_inspectors: list[Any] = []
+
     def triage_inbox(
         self,
         limit: Optional[int] = None,
@@ -53,9 +55,20 @@ class EmailService:
         """Returns observable telemetry on the recurring email loader."""
         return self.scheduler.get_status()
 
-    async def trigger_scheduler_run(self) -> Dict[str, Any]:
-        """Manually triggers immediate email triage."""
-        return await self.scheduler.run_once()
+    async def trigger_scheduler_run(
+        self,
+        days_back: Optional[int] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Manually triggers immediate email triage with optional date filtering."""
+        return await self.scheduler.run_once(
+            days_back=days_back,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
 
     def update_scheduler_config(
         self,
@@ -82,8 +95,19 @@ class EmailService:
                 "message": "Desktop email launch is only supported on Windows",
             }
 
+        if not entry_id or entry_id.startswith("demo_"):
+            return {
+                "status": "info",
+                "message": "Demo fixture emails cannot be opened in Outlook Desktop",
+            }
+
+        co_initialized = False
         try:
+            import pythoncom  # type: ignore
             import win32com.client  # type: ignore
+
+            pythoncom.CoInitialize()
+            co_initialized = True
 
             outlook = win32com.client.Dispatch("Outlook.Application")
             namespace = outlook.GetNamespace("MAPI")
@@ -94,31 +118,41 @@ class EmailService:
                     "message": "Email item not found in Outlook store",
                 }
 
-            # If Outlook is running headless (no visible Explorer), display Explorer first
+            # If Outlook is running headless (no visible Explorer), initialize and display Inbox
             if outlook.Explorers.Count == 0:
                 try:
-                    exp = item.Parent.GetExplorer()
-                    exp.Display()
+                    inbox = namespace.GetDefaultFolder(6)  # olFolderInbox
+                    inbox.Display()
                 except Exception as e_exp:
-                    log.debug("Could not show Outlook Explorer: %s", e_exp)
+                    log.debug("Could not display Outlook default folder: %s", e_exp)
 
-            item.Display()
+            insp = item.GetInspector
+            insp.Display(False)
             try:
-                insp = item.GetInspector
                 insp.Activate()
             except Exception:
                 pass
 
-            # Restore and bring window to foreground
+            # Retain inspector reference to prevent garbage collection on function return
+            self._active_inspectors.append(insp)
+            if len(self._active_inspectors) > 10:
+                self._active_inspectors.pop(0)
+
+            # Bring inspector window to foreground
             try:
                 import win32con, win32gui  # type: ignore
 
                 def _enum_cb(hwnd, _):
                     if win32gui.IsWindowVisible(hwnd):
+                        cls = win32gui.GetClassName(hwnd)
                         txt = win32gui.GetWindowText(hwnd)
-                        if item.Subject and item.Subject[:25].lower() in txt.lower():
+                        if cls == "rctrl_renwnd32" or (item.Subject and item.Subject[:20].lower() in txt.lower()):
                             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                            win32gui.SetForegroundWindow(hwnd)
+                            win32gui.BringWindowToTop(hwnd)
+                            try:
+                                win32gui.SetForegroundWindow(hwnd)
+                            except Exception:
+                                pass
 
                 win32gui.EnumWindows(_enum_cb, None)
             except Exception:
@@ -132,3 +166,10 @@ class EmailService:
         except Exception as e:
             log.warning("Could not open email %s in Outlook Desktop: %s", entry_id, e)
             return {"status": "error", "message": f"Could not open in Outlook: {e}"}
+        finally:
+            if co_initialized:
+                try:
+                    import pythoncom  # type: ignore
+                    pythoncom.CoUninitialize()
+                except Exception:
+                    pass
