@@ -40,3 +40,6 @@ Thumbs.db
 
 # Local agent workflow logs (worker/QA sessions, prompt files, PII pattern list)
 logs/
+
+# Video demo deliverables (output artifacts, not source)
+video-demo/
