@@ -474,6 +474,8 @@ def create_a2a_app(
         company = payload.get("company", "Unternehmen")
         role = payload.get("role", "Software Engineer")
         lang = payload.get("lang", "de")
+        use_gemini = bool(payload.get("use_gemini", True))
+        body_text = payload.get("body_text") or None
         job_description = payload.get("job_description") or payload.get("jobDescription")
         cv_text = payload.get("cv_text") or payload.get("cvText")
         user_feedback = payload.get("user_feedback") or payload.get("userFeedback")
@@ -490,6 +492,8 @@ def create_a2a_app(
                 recipient_address=recipient_address,
                 contact_person=contact_person,
                 lang=lang,
+                use_gemini=use_gemini,
+                body_text=body_text,
                 job_description=job_description,
                 cv_text=cv_text,
                 user_feedback=user_feedback,

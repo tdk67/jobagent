@@ -113,6 +113,8 @@ def test_a2a_server_endpoints(tmp_path: Path):
         "company": "Capgemini",
         "role": "Cloud Architect",
         "lang": "en",
+        "use_gemini": False,
+        "body_text": "Dear Hiring Team, I am writing to apply for the Cloud Architect position at Capgemini.",
     }
     res_cl = client.post("/api/v1/cover_letter/generate", json=cl_payload, headers=auth_headers)
     assert res_cl.status_code == 200
