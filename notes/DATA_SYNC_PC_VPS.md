@@ -63,7 +63,7 @@ rsync -avz -e "ssh -i ~/.ssh/id_ed25519" /c/Users/you/.ssh/ root@187.124.171.89:
 ## 2. Run a sync
 
 ```bash
-cd /path/to/jobagent   # your local checkout (must have data/jobagent.db + profile.json)
+cd /path/to/jobagent   # your local checkout (must have data/jobagent.db + profile.local.json)
 python scripts/sync_to_vps.py \
   --jobagent-dir "$PWD" \
   --host 187.124.171.89 --user root \
@@ -74,7 +74,7 @@ python scripts/sync_to_vps.py \
 | File | When |
 |---|---|
 | `data/jobagent.db` | always — **safe VACUUM INTO export** (works even while app runs) |
-| `profile.json` | first time (VPS has none) — never overwrites an existing VPS profile |
+| `profile.local.json` | always if present — the **real** profile (gitignored); CV/cover/reference PDFs it references are copied too and paths rewritten to `data/documents/` |
 | `config.local.json` | first time only, if you have one |
 
 ### Safety
@@ -132,3 +132,11 @@ ssh root@187.124.171.89 tail -20 /root/jobagent/sync/sync.log
 | `/root/jobagent/sync/backups/` | last 3 DB copies |
 | `/root/jobagent/sync/sync.log` | audit log |
 | `/root/.ssh/jobagent_sync_ed25519(.pub)` | convenience key created on VPS (VPS-internal test) |
+### Profile + CV / cover letters (added)
+- **`profile.local.json`** syncs (this is the file JobAgent actually reads — not `profile.json`).
+- CV / cover-letter / reference **PDFs** referenced inside it are copied to the VPS
+  `data/documents/` and the paths in the synced profile are rewritten to VPS-relative
+  (`data/documents/germancv.pdf`, …), so `/api/v1/documents/bundle` (used by the
+  browser extension for autofill, and by cover-letter generation) works on the VPS.
+- `certificatesDir` is dropped (local folder, not portable).
+- Profile is **always refreshed** on the VPS from the PC (it's the phone-mirror copy).
