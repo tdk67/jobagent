@@ -169,17 +169,6 @@ class EmailClassifier:
         "application", "resume", "cv", "job application", "opening"
     ])
 
-    COMPANY_CONTEXT_PREFIXES: List[str] = _RULES.get("company_context_prefixes", [
-        r"bei\s+(?:der\s+)?",
-        r"application\s+(?:at|to)\s+",
-        r"applying\s+to\s+",
-        r"interest\s+in\s+",
-        r"welcome\s+to\s+",
-        r"\bat\s+",
-        r"sent\s+to\s+",
-        r"viewed\s+by\s+",
-    ])
-
     def __init__(self, applied_companies: Optional[Dict[str, Dict[str, Any]]] = None):
         # Dict mapping lowercase company name -> application dict
         self.applied_companies = applied_companies or {}
@@ -236,9 +225,10 @@ class EmailClassifier:
 
         # Step 1: For job portal aggregators (LinkedIn, StepStone, Indeed, Join),
         # extract candidate company from subject context (e.g. "...at Code Compass", "...sent to PRACYVA")
+        subj_line = text.split("\n")[0] if "\n" in text else text
         is_portal = any(p in s_domain for p in ["linkedin.com", "stepstone", "indeed", "join.com", "xing.com"])
         if is_portal:
-            cand = self.extract_company_from_context(text, sender_name, sender_email)
+            cand = self.extract_company_from_context(subj_line, sender_name, sender_email)
             if cand:
                 cand_clean = cand.strip().lower()
                 for comp_key, comp_data in self.applied_companies.items():
@@ -250,7 +240,6 @@ class EmailClassifier:
         sorted_comps = sorted(self.applied_companies.items(), key=lambda x: len(x[0]), reverse=True)
 
         # Step 2: Direct mention of an applied company in subject line or sender display name
-        subj_line = text.split("\n")[0] if "\n" in text else text
         for comp_key, comp_data in sorted_comps:
             if len(comp_key) >= 3:
                 # Word boundary match in subject line (e.g. "Your Application to Infosys", "Thanks for Applying to Infosys!")
@@ -316,20 +305,7 @@ class EmailClassifier:
             if len(cand) >= 2 and not is_noise_company(cand) and cand.lower() not in ["uns", "ihnen", "dir", "team", "the"]:
                 return cand
 
-        # Strip trailing reference/job IDs like "AF:0270436", "CRM:0100159", "Ref: 12345", "#1234"
-        clean_subj_no_ref = re.sub(r"\s+[A-Z]{1,5}:[0-9A-Z]+(?:\b|\s|$)", "", clean_subj, flags=re.IGNORECASE)
-
-        # 3. Generic prefix pattern
-        prefix_pattern = "(?:" + "|".join(cls.COMPANY_CONTEXT_PREFIXES) + ")"
-        regex_pattern = rf'{prefix_pattern}([A-Za-z0-9\-_&äöüÄÖÜß. ]+?)(?:\s*[-/|!–]|\s+GmbH|\s+AG|\s+SE|\s+Germany|\s*$)'
-        m = re.search(regex_pattern, clean_subj_no_ref, re.IGNORECASE)
-        if m:
-            cand = m.group(1).strip()
-            cand = re.sub(r"[\s\.\,\:\;\!\?]+$", "", cand).strip()
-            if len(cand) >= 2 and not is_noise_company(cand) and cand.lower() not in ["uns", "ihnen", "dir", "team", "the"]:
-                return cand
-
-        # 4. Sender name (if not a noise company/aggregator)
+        # 3. Sender name (if not a noise company/aggregator)
         clean_sender = sender_name.strip()
         clean_sender = re.sub(r"^(?:Hiring-Team|Karriere-Team|Recruiting-Team|Team|Talent-Team|Webmailer)\s+(?:von\s+)?", "", clean_sender, flags=re.IGNORECASE)
         clean_sender = re.sub(r"\s*(?:Recruiting(?:\s+Team)?|HR\s+Team|Careers|Hiring\s+Team)$", "", clean_sender, flags=re.IGNORECASE)
