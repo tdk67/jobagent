@@ -441,79 +441,87 @@ class GmailMcpAdapter(BaseEmailAdapter):
         **kwargs: Any,
     ) -> List[EmailRecord]:
         records: List[EmailRecord] = []
+        if self.mcp_client is None:
+            try:
+                from src.mcp.client import get_mcp_client
+                self.mcp_client = get_mcp_client()
+            except Exception as e:
+                log.debug("Could not initialize MCP client: %s", e)
+                self.mcp_client = None
+
         if not self.mcp_client:
-            log.debug("No MCP client configured for GmailMcpAdapter; skipping")
-            return records
+            raise ConnectionError("Gmail MCP client is not connected. Please verify @marlinjai/email-mcp is running.")
 
         # Resolve date boundaries
         start_iso = _parse_flexible_iso(start_date) or _parse_flexible_iso(cutoff_date)
         end_iso = _parse_flexible_iso(end_date)
         if not start_iso and not end_iso:
-            # Default to last 90 days if no date boundary was provided to avoid fetching 20 years of history
-            default_cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+            # Default to last 14 days if no date boundary was provided
+            default_cutoff = datetime.now(timezone.utc) - timedelta(days=14)
             start_iso = default_cutoff.strftime("%Y-%m-%d")
 
-        fetch_limit = limit or 50
+        # Note: MCP email_search returns results in ascending chronological order from `since`.
+        # To guarantee we get the truly newest emails when limit is specified, fetch up to 1000 in the window,
+        # then sort descending and truncate to limit.
+        query_limit = max(1000, limit or 100)
 
         for folder_name in self.folders:
-            try:
-                search_args: Dict[str, Any] = {
-                    "folder": folder_name,
-                    "limit": fetch_limit,
-                    "returnBody": True,
-                }
-                if start_iso:
-                    search_args["since"] = start_iso
-                if end_iso:
-                    search_args["before"] = end_iso
+            search_args: Dict[str, Any] = {
+                "folder": folder_name,
+                "limit": query_limit,
+                "returnBody": True,
+            }
+            if start_iso:
+                search_args["since"] = start_iso
+            if end_iso:
+                search_args["before"] = end_iso
 
-                log.info("Fetching Gmail via MCP in folder '%s' (since=%s, before=%s, limit=%s)", folder_name, start_iso, end_iso, fetch_limit)
-                search_res = self.mcp_client.call_tool("email_search", search_args)
-                emails_data = json.loads(search_res) if isinstance(search_res, str) else search_res
+            log.info("Fetching Gmail via MCP in folder '%s' (since=%s, before=%s, limit=%s)", folder_name, start_iso, end_iso, query_limit)
+            search_res = self.mcp_client.call_tool("email_search", search_args)
+            emails_data = json.loads(search_res) if isinstance(search_res, str) else search_res
 
-                if not isinstance(emails_data, list):
-                    log.warning("Unexpected response format from MCP email_search: %s", type(emails_data))
-                    continue
+            if not isinstance(emails_data, list):
+                raise RuntimeError(f"Unexpected response format from MCP email_search: {emails_data}")
 
-                for msg in emails_data:
-                    raw_from = msg.get("from", "")
-                    if isinstance(raw_from, dict):
-                        sender_name = raw_from.get("name") or raw_from.get("email", "")
-                        sender_email = raw_from.get("email", "")
-                    else:
-                        s_name, s_email = email.utils.parseaddr(str(raw_from))
-                        sender_name = s_name if s_name else (s_email or str(raw_from))
-                        sender_email = s_email if s_email else str(raw_from)
+            for msg in emails_data:
+                raw_from = msg.get("from", "")
+                if isinstance(raw_from, dict):
+                    sender_name = raw_from.get("name") or raw_from.get("email", "")
+                    sender_email = raw_from.get("email", "")
+                else:
+                    s_name, s_email = email.utils.parseaddr(str(raw_from))
+                    sender_name = s_name if s_name else (s_email or str(raw_from))
+                    sender_email = s_email if s_email else str(raw_from)
 
-                    body_obj = msg.get("body")
-                    if isinstance(body_obj, dict):
-                        body_text = body_obj.get("text") or body_obj.get("html") or msg.get("snippet", "")
-                    elif isinstance(body_obj, str):
-                        body_text = body_obj
-                    else:
-                        body_text = msg.get("snippet", "")
+                body_obj = msg.get("body")
+                if isinstance(body_obj, dict):
+                    body_text = body_obj.get("text") or body_obj.get("html") or msg.get("snippet", "")
+                elif isinstance(body_obj, str):
+                    body_text = body_obj
+                else:
+                    body_text = msg.get("snippet", "")
 
-                    msg_id = str(msg.get("id", f"gmail_{len(records)}"))
-                    entry_id = f"gmail_{msg_id}" if not msg_id.startswith("gmail_") else msg_id
+                msg_id = str(msg.get("id", f"gmail_{len(records)}"))
+                entry_id = f"gmail_{msg_id}" if not msg_id.startswith("gmail_") else msg_id
 
-                    records.append(
-                        EmailRecord(
-                            entry_id=entry_id,
-                            sender_name=sender_name,
-                            sender_email=sender_email,
-                            subject=msg.get("subject", ""),
-                            received_time=msg.get("date", datetime.now(timezone.utc).isoformat()),
-                            body=body_text,
-                            preview=msg.get("snippet", body_text[:200]) if msg.get("snippet") else body_text[:200],
-                            folder=f"Gmail/{folder_name}",
-                        )
+                records.append(
+                    EmailRecord(
+                        entry_id=entry_id,
+                        sender_name=sender_name,
+                        sender_email=sender_email,
+                        subject=msg.get("subject", ""),
+                        received_time=msg.get("date", datetime.now(timezone.utc).isoformat()),
+                        body=body_text,
+                        preview=msg.get("snippet", body_text[:200]) if msg.get("snippet") else body_text[:200],
+                        folder=f"Gmail/{folder_name}",
                     )
+                )
 
-            except Exception as e:
-                log.warning("Gmail MCP search failed for folder '%s': %s", folder_name, e, exc_info=True)
+        # Sort newest first (descending)
+        records.sort(key=lambda r: str(r.received_time), reverse=True)
+        if limit:
+            records = records[:limit]
 
-        # Sort newest first
-        records.sort(key=lambda r: r.received_time, reverse=True)
         log.info("GmailMcpAdapter fetched %d emails total across folders %s", len(records), self.folders)
         return records
 

@@ -114,7 +114,14 @@
     "tut uns (?:wirklich\\s+)?leid",
     "bedauern das sehr",
     "passen (?:die voraussetzungen\\s+)?(?:aktuell\\s+)?leider nicht",
-    "wünschen (?:ihnen|dir) für (?:ihren|deinen) weiteren (?:beruflichen )?weg"
+    "wünschen (?:ihnen|dir) für (?:ihren|deinen) weiteren (?:beruflichen )?weg",
+    "(?:wasn['’]t|was not|not)\\s+selected",
+    "nicht in den engsten kreis",
+    "engsten kreis der bewerbenden",
+    "didn['’]t (?:quite )?align with",
+    "don['’]t see an? (?:ideal )?fit",
+    "\\bthis rejection\\b",
+    "\\brejection letter\\b"
   ],
   "verification_patterns": [
     "account verification",

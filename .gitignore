@@ -23,9 +23,10 @@ answered_*.json
 # Local Application Data & Outputs
 /data/
 output/
-storage/
+/storage/
 *.log
 *.pdf
+models/email_classifier/*.pkl
 
 # Working Reference POCs (Local developer migration snapshots)
 reference_poc/

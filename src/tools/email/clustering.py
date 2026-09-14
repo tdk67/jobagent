@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 from src.core.storage import JobAgentStorage, UNKNOWN_ROLE
 from src.tools.email.adapters import EmailRecord
 from src.tools.email.classifier import ClassificationResult, EmailClassifier
-from src.tools.email.normalizer import (
+from src.core.normalizer import (
     is_noise_company,
     normalize_company_name,
     normalize_role_title,

@@ -1,7 +1,7 @@
 """Tests for company and role normalization and noise rejection."""
 
 import pytest
-from src.tools.email.normalizer import (
+from src.core.normalizer import (
     is_noise_company,
     normalize_company_name,
     normalize_role_title,

@@ -44,25 +44,8 @@ class EmailIngestEngine:
 
             # 2. Gmail via MCP
             if email_cfg.gmail.enabled:
-                mcp_client: Optional[Any] = None
-                try:
-                    from src.mcp.client import get_mcp_client  # type: ignore[attr-defined]
-                    mcp_client = get_mcp_client()
-                except Exception:
-                    mcp_client = None
-                if mcp_client is None:
-                    log.warning(
-                        "Gmail ingestion enabled in config but no MCP client is wired — "
-                        "adapter will fetch nothing",
-                    )
-                else:
-                    gmail_folders = getattr(email_cfg.gmail, "folders", None) or ["INBOX"]
-                    self.adapters.append(
-                        GmailMcpAdapter(
-                            mcp_client=mcp_client,
-                            folders=gmail_folders,
-                        )
-                    )
+                gmail_folders = getattr(email_cfg.gmail, "folders", None) or ["INBOX"]
+                self.adapters.append(GmailMcpAdapter(folders=gmail_folders))
 
             # 3. Generic IMAP
             if email_cfg.generic_imap.enabled:
