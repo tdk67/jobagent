@@ -63,8 +63,8 @@ for f in profile.json config.local.json; do
     log "▶ installed $f (first-time only; never overwrites existing local file)"
   fi
 done
-# clean consumed payloads
-rm -f "$INCOMING/jobagent.db" "$INCOMING/profile.json" "$INCOMING/config.local.json" 2>/dev/null || true
+# clean consumed payloads + any stray nested dirs (e.g. accidental data/)
+rm -rf "$INCOMING"/jobagent.db "$INCOMING"/profile.json "$INCOMING"/config.local.json "$INCOMING"/data 2>/dev/null || true
 
 # ── 6. Refresh the running A2A gateway so the phone sees new data ────────
 if command -v pm2 >/dev/null 2>&1; then

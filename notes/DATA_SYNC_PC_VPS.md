@@ -7,14 +7,15 @@
 
 ---
 
-## TL;DR (once SSH key + rsync are set up)
+## TL;DR (once SSH key is set up)
 
 ```bash
-# on your PC, inside your jobagent checkout (Git Bash / WSL / PowerShell w/ Git)
-python scripts/sync_to_vps.py --jobagent-dir C:\path\to\jobagent --ssh-key C:\Users\you\.ssh\id_ed25519
+# on your PC, inside your jobagent checkout (cmd / PowerShell / Git Bash all work)
+python scripts\sync_to_vps.py --jobagent-dir . --ssh-key %USERPROFILE%\.ssh\id_ed25519
 ```
 
-That's it — it exports your live DB safely, rsyncs only changes, and the VPS
+That's it — it exports your live DB safely, transfers it (rsync if you have it,
+**otherwise tar-over-SSH which works on stock Windows 10+**), and the VPS
 hook validates + swaps + restarts the gateway automatically.
 
 ---
@@ -22,8 +23,9 @@ hook validates + swaps + restarts the gateway automatically.
 ## 1. One-time setup on your PC
 
 ### 1a. Install tools
-- **Git Bash** (Windows) or WSL — gives you `rsync`, `ssh`, `python`.
-- Windows 10/11 Git Bash already bundles rsync. Check: `rsync --version`.
+- **Windows 10/11**: OpenSSH client is built in (Settings → Apps → Optional Features →
+  add "OpenSSH Client" if `ssh -V` fails). Python from Anaconda/py works fine.
+- **macOS / Linux**: ssh + tar are built in.
 
 ### 1b. SSH key pair
 ```bash
@@ -47,11 +49,14 @@ ssh -i ~/.ssh/id_ed25519 root@187.124.171.89 "echo OK && hostname"
 # → OK
 ```
 
-### 1d. Check rsync over ssh
+### 1d. (Optional) Check rsync — only needed if you want delta transfer
+If `rsync` is on PATH (Git Bash), the script uses it automatically. Otherwise it
+falls back to tar-over-SSH — slower for big changes but zero extra installs.
+
 ```bash
+# optional self-test with Git Bash only
 rsync -avz -e "ssh -i ~/.ssh/id_ed25519" /c/Users/you/.ssh/ root@187.124.171.89:/tmp/rsync_self_test/
 ```
-You should see it create `/tmp/rsync_self_test` on the VPS.
 
 ---
 
