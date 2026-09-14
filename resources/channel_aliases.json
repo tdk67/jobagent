@@ -1,9 +1,23 @@
 {
+  "_comment": "External channel configuration: cosmetic name aliases + generic consumer email domains. Nothing here is hardcoded in Python.",
   "bamboohr": "BambooHR",
   "linkedin": "LinkedIn",
   "successfactors": "SuccessFactors",
   "smartrecruiters": "SmartRecruiters",
   "teamtailor": "Teamtailor",
   "stepstone": "StepStone",
-  "softgarden": "Softgarden"
+  "softgarden": "Softgarden",
+  "consumer_domains": [
+    "gmail.com",
+    "googlemail.com",
+    "outlook.com",
+    "hotmail.com",
+    "yahoo.com",
+    "yahoo.de",
+    "gmx.de",
+    "gmx.net",
+    "web.de",
+    "t-online.de",
+    "icloud.com"
+  ]
 }

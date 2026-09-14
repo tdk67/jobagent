@@ -290,6 +290,23 @@ def cmd_cycle(cfg: Any) -> None:
     print(json.dumps(res, indent=2))
 
 
+def cmd_agent(cfg: Any, poll_seconds: Optional[int] = None) -> None:
+    """Runs the Strands event-loop autonomous agent (wake-perceive-decide-execute-record)."""
+    from src.agent.event_loop import EventLoopAgent
+
+    poll = poll_seconds or getattr(cfg.agent, "poll_seconds", 300) or 300
+    print("=" * 70)
+    print(f">> JobAgent Event-Loop Agent (Poll: {poll}s, DB: {cfg.storage.database_path})")
+    print(">> LLM available:", bool(os.getenv("GEMINI_API_KEY") or os.getenv("AWS_ACCESS_KEY_ID")))
+    print(">> Press Ctrl+C to stop agent.")
+    print("=" * 70)
+    loop = EventLoopAgent(coordinator=JobAgentCoordinator(config=cfg), poll_seconds=poll)
+    try:
+        loop.run()
+    except KeyboardInterrupt:
+        print("\n>> Agent stopped cleanly.")
+
+
 def cmd_daemon(cfg: Any, interval_minutes: int = 30) -> None:
     """Runs autonomous triage & compliance cycles periodically in the background (P3)."""
     import time
@@ -395,6 +412,18 @@ def main():
     parser.add_argument("--lang", type=str, default="de", choices=["de", "en"], help="Language for cover letter (de or en)")
     parser.add_argument("--sync-to-vps", type=str, default=None, help="Securely sync local personal data to a remote VPS JobAgent instance (requires HTTPS URL)")
     parser.add_argument("--token", type=str, default=None, help="API Token for VPS Sync authentication")
+    parser.add_argument(
+        "--agent",
+        action="store_true",
+        help="Run the Strands event-loop autonomous agent (wake-perceive-decide-execute-record).",
+    )
+    parser.add_argument(
+        "--agent-interval",
+        type=int,
+        default=None,
+        metavar="SECONDS",
+        help="Agent loop poll interval in seconds (default: config or 300s).",
+    )
     args = parser.parse_args()
 
     cfg = load_config()
@@ -426,6 +455,8 @@ def main():
     elif args.daemon or args.schedule:
         interval = args.schedule or 30
         cmd_daemon(cfg, interval_minutes=interval)
+    elif args.agent:
+        cmd_agent(cfg, poll_seconds=args.agent_interval)
     elif args.cycle:
         cmd_cycle(cfg)
     elif args.cover_letter:

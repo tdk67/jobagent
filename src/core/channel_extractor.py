@@ -14,6 +14,42 @@ from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
 
+_RULES_DIR = Path(__file__).resolve().parents[2] / "resources"
+
+
+# Common generic consumer email providers where domain is not the employer/ATS.
+# Externalized to resources/channel_aliases.json ("consumer_domains") — code
+# never hardcodes these; empty set means no provider is assumed generic.
+CONSUMER_DOMAINS: set = set()
+_CHANNEL_ALIASES: Optional[Dict[str, str]] = None
+
+
+def _load_rules() -> Dict[str, object]:
+    """Loads external channel rules (aliases + consumer domains) from resources."""
+    global CONSUMER_DOMAINS, _CHANNEL_ALIASES
+    if _CHANNEL_ALIASES is not None:
+        return {}
+    data: Dict[str, object] = {}
+    alias_file = _RULES_DIR / "channel_aliases.json"
+    if alias_file.exists():
+        try:
+            data = json.loads(alias_file.read_text(encoding="utf-8"))
+        except Exception as e:
+            log.debug("Could not read resources/channel_aliases.json: %s", e)
+    consumer = data.pop("consumer_domains", [])
+    CONSUMER_DOMAINS = set(str(c).lower() for c in consumer)
+    _CHANNEL_ALIASES = {str(k): str(v) for k, v in data.items()}
+    return data
+
+
+# Ensure the module-level constants are populated before first use.
+_load_rules()
+
+
+def _get_channel_aliases() -> Dict[str, str]:
+    """Returns the loaded cosmetic channel-name aliases (empty dict if none)."""
+    return dict(_CHANNEL_ALIASES or {})
+
 # Common generic consumer email providers where domain is not the employer/ATS
 CONSUMER_DOMAINS = {
     "gmail.com",

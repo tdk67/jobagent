@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.core.config import AppConfig, load_config
@@ -20,6 +21,26 @@ from src.core.profile import CandidateProfile, load_profile
 from src.core.storage import JobAgentStorage
 
 log = logging.getLogger(__name__)
+
+_RULES_DIR = Path(__file__).resolve().parents[3] / "resources"
+
+
+def _load_legal_keywords() -> List[str]:
+    """Loads the legally-sensitive field keywords from resources/legally_sensitive_keywords.json.
+
+    Returns an empty list if the resource is missing — forcing explicit human review
+    only when configuration actually declares the field as sensitive.
+    """
+    rules_file = _RULES_DIR / "legally_sensitive_keywords.json"
+    if not rules_file.exists():
+        return []
+    try:
+        import json
+        data = json.loads(rules_file.read_text(encoding="utf-8"))
+        return [str(k).lower() for k in data]
+    except Exception as e:
+        log.warning("Could not read legally_sensitive_keywords.json: %s", e)
+        return []
 
 
 class FormReasoner:
@@ -221,14 +242,12 @@ class FormReasoner:
         # No postal code: the last segment is the city for 'Street, City' layouts
         return segments[-1]
 
-    LEGALLY_SENSITIVE_KEYWORDS = [
-        "citizenship", "staatsangehörigkeit", "sponsorship", "visum", "visa",
-        "arbeitserlaubnis", "work authorization", "criminal", "vorstrafen",
-        "disability", "behinderung", "salary", "gehalt", "compensation"
-    ]
+    # Which field descriptions require explicit human review (legally significant).
+    # Externalized to resources/legally_sensitive_keywords.json — never inline.
+    LEGALLY_SENSITIVE_KEYWORDS: List[str] = _load_legal_keywords()
 
     def reason_form(self, fields: List[Dict[str, Any]], page_url: Optional[str] = None) -> Dict[str, Any]:
-        """Maps form fields using 2-pass strategy: Local Heuristics & QA Memory -> Multimodal Gemini 3.8 Flash."""
+        """Maps form fields using 2-pass strategy: Local Heuristics & QA Memory -> Multimodal Gemini."""
         self.ensure_qa_seeded()
         approved_mappings: Dict[str, Any] = {}
         unmapped_fields: List[Dict[str, Any]] = []
