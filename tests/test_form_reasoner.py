@@ -346,10 +346,10 @@ def test_form_reasoner_easy_apply_popup_fields(temp_db: JobAgentStorage):
     """Verifies that Easy Apply popup fields (Headline, Summary, Cover letter textarea) are accurately resolved."""
     profile = CandidateProfile(
         personal=PersonalInfo(
-            fullName="Tamas Deak",
-            email="tamas.deak@example.com",
+            fullName="Jane Doe",
+            email="jane.doe@example.com",
             phone="+49 1520 000000",
-            city="Dietzenbach",
+            city="Frankfurt",
             headline="Senior Software Engineer / Tech Lead",
             summaryDe="Senior Software Engineer mit über 25 Jahren Erfahrung in verteilten Systemen.",
             summaryEn="Senior Software Engineer with 25+ years experience in distributed systems.",
@@ -358,7 +358,7 @@ def test_form_reasoner_easy_apply_popup_fields(temp_db: JobAgentStorage):
         ),
         preferences=Preferences(
             targetRoles=["Senior Software Engineer / Tech Lead"],
-            locations=["Frankfurt", "Dietzenbach"],
+            locations=["Frankfurt"],
         ),
     )
     reasoner = FormReasoner(storage=temp_db, profile=profile)
@@ -399,11 +399,11 @@ def test_form_reasoner_easy_apply_popup_fields(temp_db: JobAgentStorage):
 def test_form_reasoner_middle_name_does_not_fall_through_to_first_name(temp_db: JobAgentStorage):
     profile = CandidateProfile(
         personal=PersonalInfo(
-            fullName="Tamas Deak",
-            firstName="Tamas",
-            lastName="Deak",
+            fullName="Jane Doe",
+            firstName="Jane",
+            lastName="Doe",
             middleName="",
-            email="tamas@example.com",
+            email="jane@example.com",
         )
     )
     reasoner = FormReasoner(storage=temp_db, profile=profile)
@@ -417,9 +417,9 @@ def test_form_reasoner_middle_name_does_not_fall_through_to_first_name(temp_db: 
     res = reasoner.reason_form(fields)
     mappings = res["mappings"]
 
-    assert mappings["f_first"] == "Tamas"
-    assert mappings["f_middle"] == ""  # Never fall through to Tamas!
-    assert mappings["f_last"] == "Deak"
+    assert mappings["f_first"] == "Jane"
+    assert mappings["f_middle"] == ""  # Never fall through to first name!
+    assert mappings["f_last"] == "Doe"
 
 
 def test_form_reasoner_dynamic_languages_no_hardcoding(temp_db: JobAgentStorage):

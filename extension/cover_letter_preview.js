@@ -108,7 +108,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   const p = (profile && profile.personal) || {};
   const j = (profile && profile.preferences) || {};
-  const candName = p.fullName || `${p.firstName || ''} ${p.lastName || ''}`.trim() || "Tamas Deak";
+  const candName = p.fullName || `${p.firstName || ''} ${p.lastName || ''}`.trim() || "Candidate";
   if (senderName) senderName.innerText = candName;
   if (signatureName) signatureName.innerText = candName;
   if (senderContact && (p.street || p.city || p.phone || p.email)) {

@@ -177,14 +177,14 @@ def test_cover_letter_dynamic_prompt_includes_job_description_and_cv(tmp_path: P
     engine = CoverLetterEngine(output_dir=out_dir)
 
     prof = CandidateProfile(
-        personal=PersonalInfo(fullName="Tamas Deak", email="tamas@example.com")
+        personal=PersonalInfo(fullName="Jane Doe", email="jane.doe@example.com")
     )
 
     captured_prompts = []
 
     def mock_gemini(prompt: str, **kwargs):
         captured_prompts.append(prompt)
-        return "Sehr geehrte Damen und Herren,\n\nich bewerbe mich hiermit für die Position bei Capgemini.\n\nMit freundlichen Grüßen,\nTamas Deak"
+        return "Sehr geehrte Damen und Herren,\n\nich bewerbe mich hiermit für die Position bei Capgemini.\n\nMit freundlichen Grüßen,\nJane Doe"
 
     with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}):
         with patch("src.tools.cover_letter_tool.call_gemini_semantic_analysis", side_effect=mock_gemini):
