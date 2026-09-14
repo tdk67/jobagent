@@ -157,3 +157,48 @@ def test_config_model_names_not_in_code():
     assert defaults.provider == ""
     assert defaults.model == ""
     assert "gemini-3.8-flash" not in defaults.model
+
+def test_batched_llm_classification_single_call(tmp_path: Path, monkeypatch):
+    """Ambiguous emails are classified in ONE batched LLM call (rate-limit fix)."""
+    from src.tools.email.clustering import ApplicationClusterer
+    from src.core.config import AppConfig, EmailIngestionConfig
+    import src.tools.email.clustering as clustering_mod
+
+    db_path = tmp_path / "batch.db"
+    storage = JobAgentStorage(str(db_path))
+    # Ambiguous career-context emails that rules score low-confidence.
+    records = [
+        MockEmailAdapter([{
+            "entry_id": f"amb_{i}",
+            "sender_name": f"Sender {i}",
+            "sender_email": f"recruiter{i}@someco.de",
+            "subject": "Positionsbezogenes Gespräch über Ihr Profil",
+            "body": "Wir hätten gerne ein unverbindliches Gespräch zu Ihrer Bewerbung im Bereich Softwareentwicklung.",
+            "received_time": "2026-09-21T09:0{i}:00Z",
+        }]).fetch_emails()[0]
+        for i in range(3)
+    ]
+
+    call_counter = {"n": 0}
+
+    def fake_call_gemini(prompt: str) -> str:
+        call_counter["n"] += 1
+        import json as _json
+        return _json.dumps([
+            {"entry_id": "amb_0", "category": "follow_up", "confidence": 0.9, "reasoning": "recruiter inquiry"},
+            {"entry_id": "amb_1", "category": "follow_up", "confidence": 0.9, "reasoning": "recruiter inquiry"},
+            {"entry_id": "amb_2", "category": "noise", "confidence": 0.9, "reasoning": "sales pitch"},
+        ])
+
+    monkeypatch.setattr("src.core.llm_provider.call_gemini_semantic_analysis", fake_call_gemini)
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+
+    clusterer = ApplicationClusterer(storage=storage)
+    res = clusterer.cluster_batch(records, folder="Bewerbung", enable_llm_fallback=True)
+
+    assert call_counter["n"] == 1  # ONE call for the whole ambiguous batch
+    assert res["total_processed"] == 3
+    assert len(clusterer._batch_llm_results) >= 3
+    # The batched results are reused (no per-email LLM calls).
+    assert clusterer._batch_llm_results["amb_0"].category == "follow_up"
+    assert clusterer._batch_llm_results["amb_2"].category == "noise"

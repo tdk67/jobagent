@@ -83,6 +83,12 @@ Incoming Email (Outlook MAPI / Gmail / IMAP)
    │
    ▼ (Low confidence / edge cases)
 [ Tier 3: LLM Semantic Engine ] ──(Chain-of-thought intent extraction)──► Gemini Flash Semantic Reasoning (Quota-managed)
+   │
+   ▼ (Multiple ambiguous emails in one triage batch)
+[ Batched Tier 3b: LLM Batch Classification ] ──► ONE Gemini call classifies the whole ambiguous remainder
+   │   (cutting per-email API calls; rate-limit friendly)
+   ▼
+CRM Update + Watermark Advance + Agent Loop Audit
 ```
 
 ### Why a Multi-Tier Approach?
@@ -172,6 +178,21 @@ Invalid integer values (e.g. `A2A_PORT=abc`) are logged as warnings and ignored.
 ---
 
 ## 💼 Real-World Daily Usage
+
+### 0. Run the Autonomous Background Agent
+
+```bash
+# Start the Strands event-loop agent (downloads new emails, classifies them into
+# the CRM, surfaces interviews as pending approvals, records honest audit cycles).
+python run_agent.py --agent --agent-interval 300
+```
+
+The agent loop: **wake → perceive (delta since watermark) → LLM decides → tool calls
+(ingest_emails, get_pipeline_statistics, ask_human_for_approval) → record cycle**.
+It is fully idempotent (per-email watermark), so crash-safe restarts never
+re-process an email. When no `GEMINI_API_KEY` is configured, the loop still
+downloads and classifies but labels every output `[offline]` — it never pretends
+the LLM reasoned.
 
 ### Step 1: Install the Browser Copilot Extension
 The extension integrates JobAgent directly into your browser while you apply for jobs:
@@ -317,6 +338,10 @@ JobAgent is built as a **hybrid system** that serves both human job seekers and 
   - Open `output/afa_table_report.html` to preview German statutory compliance tables before printing.
 - **CLI Terminal Interface (`run_agent.py`)**:
   - Quick, scriptable commands for bulk triage, weekly date slicing, and PDF rendering.
+  - **`python run_agent.py --agent [--agent-interval SECONDS]`** starts the Strands event-loop
+    autonomous agent: it wakes, downloads the newest raw emails, lets the LLM decide via tool
+    calls (`ingest_emails`, `get_pipeline_statistics`, `ask_human_for_approval`), and records
+    an honest `agent_cycles` audit row. Reports remain a user command.
 
 ### 2. Interfaces for AI Agents (A2A & MCP)
 - Exposes standard **Model Context Protocol (MCP)** tools and REST/SSE endpoints.
