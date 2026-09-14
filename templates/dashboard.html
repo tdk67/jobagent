@@ -842,8 +842,8 @@
                     🔗 Continue Application ↗
                   </a>
                 {% endif %}
-                {% if app.notes and ("Archived:" in app.notes or ".md" in app.notes) %}
-                  <button type="button" onclick='openSavedJdModal({{ app.company | tojson }}, {{ app.role | tojson }}, {{ app.job_url | tojson }}, {{ app.notes | tojson }})' title="View archived job description and requirements" style="display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 8px; border-radius: 6px; background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); cursor: pointer;">
+                {% if app.job_description_md or (app.notes and ("Archived:" in app.notes or ".md" in app.notes)) %}
+                  <button type="button" onclick='openSavedJdModal({{ app.id | tojson }}, {{ app.company | tojson }}, {{ app.role | tojson }}, {{ app.job_url | tojson }})' title="View archived job description and requirements" style="display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 8px; border-radius: 6px; background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); cursor: pointer;">
                     💾 View Saved JD
                   </button>
                 {% endif %}
@@ -1354,7 +1354,7 @@
         .replace(/'/g, "&#039;");
     }
 
-    async function openSavedJdModal(company, role, jobUrl, notes) {
+    async function openSavedJdModal(appId, company, role, jobUrl) {
       document.getElementById("modalCompanyTitle").textContent = company || "Saved Job Application";
       document.getElementById("modalRoleSubtitle").textContent = (role || "Role Description") + " • Saved Job Details";
 
@@ -1386,28 +1386,17 @@
         `;
       }
 
-      let archiveFile = "";
-      if (notes && notes.includes("Archived:")) {
-        const parts = notes.split("Archived:");
-        if (parts.length > 1) {
-          archiveFile = parts[1].trim();
+      // Fetch job description from DB via application ID
+      try {
+        const res = await fetch(`/api/v1/applications/${appId}/job-description`);
+        const data = await res.json();
+        if (data.status === "ok" && data.content) {
+          bodyEl.innerHTML = linkHeader + `<div style="font-family: inherit; line-height: 1.6; white-space: pre-wrap; font-size: 13.5px; color: var(--text-primary);">${escapeHtml(data.content)}</div>`;
+        } else {
+          bodyEl.innerHTML = linkHeader + `<div style="padding: 12px; background: rgba(255,255,255,0.03); border-radius: 6px;"><p style="margin: 0; font-size: 13px; color: var(--text-secondary);">No job description stored for this application.</p></div>`;
         }
-      }
-
-      if (archiveFile) {
-        try {
-          const res = await fetch(`/api/v1/archive/content?file=${encodeURIComponent(archiveFile)}`);
-          const data = await res.json();
-          if (data.status === "ok" && data.content) {
-            bodyEl.innerHTML = linkHeader + `<div style="font-family: inherit; line-height: 1.6; white-space: pre-wrap; font-size: 13.5px; color: var(--text-primary);">${escapeHtml(data.content)}</div>`;
-          } else {
-            bodyEl.innerHTML = linkHeader + `<div style="padding: 12px; background: rgba(255,255,255,0.03); border-radius: 6px;"><p style="margin: 0; font-size: 13px; color: var(--text-secondary);">${escapeHtml(notes || 'No offline snapshot recorded.')}</p></div>`;
-          }
-        } catch (e) {
-          bodyEl.innerHTML = linkHeader + `<div style="padding: 12px; background: rgba(255,255,255,0.03); border-radius: 6px;"><p style="margin: 0; font-size: 13px; color: var(--text-secondary);">${escapeHtml(notes || 'No offline snapshot recorded.')}</p></div>`;
-        }
-      } else {
-        bodyEl.innerHTML = linkHeader + `<div style="padding: 12px; background: rgba(255,255,255,0.03); border-radius: 6px;"><p style="margin: 0; font-size: 13px; color: var(--text-secondary);">${escapeHtml(notes || 'No additional notes or offline snapshot saved for this application.')}</p></div>`;
+      } catch (e) {
+        bodyEl.innerHTML = linkHeader + `<div style="padding: 12px; background: rgba(255,255,255,0.03); border-radius: 6px;"><p style="margin: 0; font-size: 13px; color: var(--text-secondary);">Failed to load job description.</p></div>`;
       }
 
       document.getElementById("emailModalOverlay").className = "email-modal-overlay open";

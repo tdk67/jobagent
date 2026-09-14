@@ -410,7 +410,7 @@ def create_a2a_app(
             raw_html=payload.get("html"),
         )
 
-    @app.get("/api/v1/applications/{app_id}/job-description", dependencies=[Depends(verify_token)])
+    @app.get("/api/v1/applications/{app_id}/job-description")
     async def get_job_description(app_id: int) -> Dict[str, Any]:
         """Returns the stored Markdown job description for a given application from the local CRM database."""
         try:
