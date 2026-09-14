@@ -7,8 +7,10 @@ This script pushes that copy: laptop → VPS.
 
 What it syncs (from your local jobagent folder):
   - data/jobagent.db            (the CRM — always)
-  - profile.json                (candidate profile — first time)
+  - profile.local.json          (candidate profile + CV/cover-letter paths — real one, gitignored)
   - config.local.json           (only if you have one)
+  - CV / cover-letter / reference PDFs referenced in profile.local.json
+    (copied to VPS data/documents/, and paths in profile rewritten to VPS-relative)
 
 How it works (works on stock Windows + Mac + Linux — no rsync needed):
   1. Safe SQLite export (VACUUM INTO) so the live DB is never corrupted.
@@ -26,6 +28,7 @@ Usage (from cmd/PowerShell/Git Bash — python resolves ssh from PATH):
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import sqlite3
 import subprocess
@@ -145,6 +148,57 @@ def transfer_via_rsync(staging: Path, dest: str, key: Path, port: int, dry_run: 
     return run(cmd, dry_run)
 
 
+def gather_profile_and_docs(ja: Path, staging: Path) -> None:
+    """Collect profile.local.json (the real one) plus the PDFs it references.
+    Rewrites document paths to VPS-relative data/documents/<name> and drops
+    certificatesDir (directory listing is not portable)."""
+    prof_src = ja / "profile.local.json"
+    if not prof_src.exists():
+        log("ℹ no profile.local.json found — skipping profile/CV sync (add one to sync them)")
+        return
+
+    try:
+        prof = json.loads(prof_src.read_text(encoding="utf-8"))
+    except Exception as e:
+        log(f"⚠ could not read profile.local.json: {e}")
+        return
+
+    docs = prof.get("documents", {}) or {}
+    new_docs: dict = {}
+    doc_dir = staging / "documents"
+    doc_dir.mkdir(exist_ok=True)
+
+    for key in ("germanCv", "englishCv", "referenceLetter", "coverLetter"):
+        raw = docs.get(key)
+        if not raw:
+            continue
+        # Resolve: absolute Windows path, or relative to the local repo
+        p = Path(raw).expanduser()
+        if not p.is_absolute():
+            p = (ja / raw).expanduser()
+        if not p.exists():
+            log(f"⚠ document {key} not found locally: {raw}")
+            continue
+        if not p.is_file() or p.stat().st_size == 0:
+            log(f"⚠ document {key} is not a file / empty: {raw}")
+            continue
+        dest_name = f"{key.lower()}{p.suffix or '.pdf'}"
+        shutil.copy2(p, doc_dir / dest_name)
+        new_docs[key] = f"data/documents/{dest_name}"  # VPS-relative path
+        log(f"✓ doc {key} → data/documents/{dest_name}")
+
+    if new_docs:
+        prof["documents"] = new_docs
+    # certificatesDir is a local folder — not portable; drop it
+    prof.get("documents", {}).pop("certificatesDir", None)
+
+    (staging / "profile.local.json").write_text(
+        json.dumps(prof, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    log("✓ profile.local.json (doc paths rewritten to VPS layout)")
+
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="187.124.171.89")
@@ -174,7 +228,9 @@ def main() -> None:
             log("❌ could not export DB")
             sys.exit(1)
 
-        for extra in ("profile.json", "config.local.json"):
+        gather_profile_and_docs(ja, staging)
+
+        for extra in ("config.local.json",):
             p = ja / extra
             if p.exists():
                 shutil.copy2(p, staging / extra)

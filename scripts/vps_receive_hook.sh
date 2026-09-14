@@ -56,15 +56,27 @@ fi
 mv "$DB_IN" "$CUR"
 log "✓ installed new DB ($(du -h "$CUR" | cut -f1), source=$SRC)"
 
-# ── 5. Also install profile/config if present ────────────────────────────
-for f in profile.json config.local.json; do
+# ── 5. Also install profile.local.json + documents if present ──────────
+# JobAgent reads profile.local.json (gitignored, real candidate data).
+# CV/cover PDFs arrive under incoming/documents/ → data/documents/.
+if [[ -f "$INCOMING/profile.local.json" ]]; then
+  # Always refresh profile.local.json from the PC (it's the phone-mirror copy).
+  cp "$INCOMING/profile.local.json" "$ROOT_DIR/profile.local.json"
+  log "▶ installed profile.local.json"
+fi
+if [[ -d "$INCOMING/documents" ]]; then
+  mkdir -p "$ROOT_DIR/data/documents"
+  cp -f "$INCOMING/documents/"* "$ROOT_DIR/data/documents/" 2>/dev/null || true
+  log "▶ installed documents → data/documents/ ($(ls "$ROOT_DIR/data/documents" | wc -l) files)"
+fi
+for f in config.local.json; do
   if [[ -f "$INCOMING/$f" && ! -f "$ROOT_DIR/$f" ]]; then
     cp "$INCOMING/$f" "$ROOT_DIR/$f"
     log "▶ installed $f (first-time only; never overwrites existing local file)"
   fi
 done
 # clean consumed payloads + any stray nested dirs (e.g. accidental data/)
-rm -rf "$INCOMING"/jobagent.db "$INCOMING"/profile.json "$INCOMING"/config.local.json "$INCOMING"/data 2>/dev/null || true
+rm -rf "$INCOMING"/jobagent.db "$INCOMING"/profile.local.json "$INCOMING"/profile.json "$INCOMING"/config.local.json "$INCOMING"/documents "$INCOMING"/data 2>/dev/null || true
 
 # ── 6. Refresh the running A2A gateway so the phone sees new data ────────
 if command -v pm2 >/dev/null 2>&1; then
