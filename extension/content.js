@@ -7,6 +7,46 @@
   window.JobAgent = window.JobAgent || {};
   console.log("[JobAgent Copilot] Injected and active on:", window.location.href);
 
+  // Shared helper: after any fill pass, mirror unfilled "confirm/verify/repeat" fields
+  // from their already-filled counterpart (handles "Confirm your email", "Passwort bestätigen", etc.)
+  function mirrorConfirmFields(schema, elementMap) {
+    const CONFIRM_RE = /\b(confirm|bestätigung|bestätige|verify|verification|repeat|retype|re-enter|wiederhole|nochmals|erneut)\b/i;
+    let mirrored = 0;
+    for (const field of schema) {
+      if (!CONFIRM_RE.test(field.label)) continue;
+      const cEl = elementMap.get(field.fieldId);
+      if (!cEl || cEl.value) continue;
+
+      const baseLabel = field.label
+        .replace(CONFIRM_RE, "")
+        .replace(/[^a-zA-Z0-9äöüÄÖÜß]+/g, " ")
+        .trim()
+        .toLowerCase();
+
+      let mirrorVal = null;
+      for (const f of schema) {
+        if (f.fieldId === field.fieldId) continue;
+        const fEl = elementMap.get(f.fieldId);
+        const fVal = fEl && fEl.value && fEl.value.trim();
+        if (!fVal) continue;
+        const fLabel = f.label.toLowerCase().trim();
+        if (baseLabel && (fLabel === baseLabel || fLabel.includes(baseLabel) || baseLabel.includes(fLabel))) {
+          mirrorVal = fVal;
+          break;
+        }
+        if (cEl.type && cEl.type !== "text" && fEl.type === cEl.type) {
+          mirrorVal = fVal;
+          break;
+        }
+      }
+
+      if (mirrorVal && window.JobAgent.applyValueToElement(cEl, mirrorVal)) {
+        mirrored++;
+      }
+    }
+    return mirrored;
+  }
+
   function performAutofill(request, sendResponse) {
     const { schema, elementMap } = window.JobAgent.extractFormSchema();
     console.log(`[JobAgent Copilot] Autofill triggered on ${window.location.href}. Found ${schema.length} fields.`);
@@ -59,6 +99,9 @@
         }
       }
 
+      // POST-FILL PASS: mirror "confirm/verify/repeat" fields from their already-filled twin
+      filledCount += mirrorConfirmFields(schema, elementMap);
+
       const docsAttached = window.JobAgent.attachDocumentsToPage
         ? await window.JobAgent.attachDocumentsToPage(documents)
         : 0;
@@ -84,6 +127,7 @@
 
           console.log("[JobAgent Copilot] Message proxy unavailable, falling back to local engine...");
           window.JobAgent.localFallbackFill(schema, elementMap, profile, documents).then((count) => {
+            count += mirrorConfirmFields(schema, elementMap);
             if (window.JobAgent.attachDocumentsToPage) {
               window.JobAgent.attachDocumentsToPage(documents).then((docsAttached) => {
                 if (sendResponse) {
@@ -100,6 +144,7 @@
     }
 
     window.JobAgent.localFallbackFill(schema, elementMap, profile, documents).then((count) => {
+      count += mirrorConfirmFields(schema, elementMap);
       if (window.JobAgent.attachDocumentsToPage) {
         window.JobAgent.attachDocumentsToPage(documents).then((docsAttached) => {
           if (sendResponse) {

@@ -211,11 +211,20 @@ document.addEventListener("DOMContentLoaded", async () => {
       });
       if (ping) return true;
 
-      // Tab was opened before extension was reloaded: inject content.js on the fly
+      // Tab was opened before extension was reloaded: inject all modules + content.js on the fly
       if (chrome.scripting && chrome.scripting.executeScript) {
         await chrome.scripting.executeScript({
           target: { tabId: tabId, allFrames: true },
-          files: ["content.js"],
+          files: [
+            "modules/job_session_manager.js",
+            "modules/job_extractor.js",
+            "modules/form_extractor.js",
+            "modules/field_writer.js",
+            "modules/document_uploader.js",
+            "modules/local_fallback.js",
+            "modules/ui_overlay.js",
+            "content.js",
+          ],
         });
         await new Promise((r) => setTimeout(r, 150));
         return true;
@@ -354,13 +363,42 @@ document.addEventListener("DOMContentLoaded", async () => {
         gatewayUrl: isGatewayOnline ? gatewayUrl : "",
       };
 
-      // Runtime messaging (chrome.tabs.sendMessage) reaches content scripts in ALL
-      // frames of the tab — no window-level broadcast needed (would expose the
-      // payload to any third-party iframe on the page).
+      // Probe all frames to find which one has visible form fields.
+      // SmartRecruiters, Workday, and other SPAs often render the application
+      // form inside a child iframe — chrome.tabs.sendMessage without frameId
+      // sends to the top frame first, which has no fields and replies
+      // "No fields detected" before the iframe can respond.
+      let targetFrameId = 0; // default to main frame
+      try {
+        if (chrome.scripting && chrome.scripting.executeScript) {
+          const probeResults = await chrome.scripting.executeScript({
+            target: { tabId: activeTab.id, allFrames: true },
+            func: () => {
+              if (window.JobAgent && typeof window.JobAgent.extractFormSchema === "function") {
+                try {
+                  return window.JobAgent.extractFormSchema().schema.length;
+                } catch (e) { return 0; }
+              }
+              return 0;
+            },
+          });
+          // Pick the frame with the most fields (prefer child frames over top frame)
+          const best = (probeResults || [])
+            .filter((r) => r.result > 0)
+            .sort((a, b) => b.result - a.result)[0];
+          if (best) {
+            targetFrameId = best.frameId;
+            console.log(`[JobAgent Copilot] Autofill targeting frameId=${targetFrameId} (${best.result} fields found)`);
+          } else {
+            console.log("[JobAgent Copilot] No fields found in any frame — will try main frame anyway.");
+          }
+        }
+      } catch (probeErr) {
+        console.warn("[JobAgent Copilot] Frame probe error (proceeding with main frame):", probeErr);
+      }
 
-
-      // Send standard runtime message to active tab
-      chrome.tabs.sendMessage(activeTab.id, payload, (res) => {
+      // Send to the frame that has fields (or fall back to main frame)
+      chrome.tabs.sendMessage(activeTab.id, payload, { frameId: targetFrameId }, (res) => {
         btnAutofill.disabled = false;
         btnAutofill.textContent = "Auto-Fill Current Form";
 
