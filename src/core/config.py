@@ -25,13 +25,18 @@ log = logging.getLogger(__name__)
 
 
 class AgentConfig(BaseModel):
+    """Agent LLM provider selection.
+
+    All real provider/model values live in config.example.json / config.local.json
+    per the project rule 'operational parameters are loaded from config files,
+    never hardcoded in code'. The defaults here are intentionally provider-agnostic
+    placeholders, never real model identifiers.
+    """
     name: str = "JobAgent"
-    # Supported providers: 'gemini', 'bedrock', 'ollama'
-    # For Ollama, you might use model: 'llama3' or 'phi3'
-    provider: str = "gemini"
-    model: str = "gemini-3.8-flash"
-    fallback_provider: str = "bedrock"
-    fallback_model: str = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    provider: str = ""
+    model: str = ""
+    fallback_provider: str = ""
+    fallback_model: str = ""
     temperature: float = 0.1
 
 

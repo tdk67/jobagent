@@ -157,12 +157,7 @@ class EmailClassifier:
         "calendly.com",
     ]))
 
-    KNOWN_ATS_DOMAINS: Set[str] = set(_RULES.get("known_ats_domains", [
-        "personio.de", "personio.com", "greenhouse.io", "greenhouse-mail.io",
-        "lever.co", "smartrecruiters.com", "myworkday.com", "workday.com",
-        "ashbyhq.com", "jobvite.com", "recruitee.com", "softgarden.de", "dvinci.de",
-        "join.com", "bamboohr.com", "teamtailor.com",
-    ]))
+    KNOWN_ATS_DOMAINS: Set[str] = set(_RULES.get("known_ats_domains", []))
 
     CAREER_CONTEXT_KEYWORDS: List[str] = _RULES.get("career_context_keywords", [
         "bewerbung", "stelle", "position", "lebenslauf", "candidate", "interview",

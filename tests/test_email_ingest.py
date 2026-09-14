@@ -366,8 +366,11 @@ def test_run_triage_passes_llm_fallback_flag(tmp_path: Path, monkeypatch: pytest
     engine = EmailIngestEngine(storage=storage, config=config, adapters=[mock_adapter])
     engine.run_triage(limit=10)
 
-    assert len(capped) == 1
-    assert capped[0]["enable_llm_fallback"] is True
+    # Pre-filter (batch ambiguity scan) runs without LLM; the real classification
+    # call for the email receives the propagated True flag.
+    assert len(capped) == 2
+    assert capped[0]["enable_llm_fallback"] is False   # batch pre-filter: never LLM
+    assert capped[1]["enable_llm_fallback"] is True    # actual classify: flag propagated
 
 
 def test_run_triage_llm_fallback_false_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

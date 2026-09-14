@@ -15,6 +15,7 @@ Ensures:
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any, Dict, List, Optional
@@ -32,7 +33,12 @@ log = logging.getLogger(__name__)
 
 
 class ApplicationClusterer:
-    """Clusters incoming or cached emails into canonical job application entities."""
+    """Clusters incoming or cached emails into canonical job application entities.
+
+    Batched LLM tier: when a batch contains multiple rule-ambiguous emails, they
+    are sent to Gemini in ONE combined call (schema-only), cutting the per-email
+    LLM cost to a fraction and avoiding per-call rate limits.
+    """
 
     def __init__(
         self,
@@ -42,6 +48,8 @@ class ApplicationClusterer:
         self.storage = storage
         self.classifier = classifier or EmailClassifier()
         self._comp_map: Optional[Dict[str, Dict[str, Any]]] = None
+        # entry_id -> ClassificationResult from a batched LLM pass (single API call)
+        self._batch_llm_results: Dict[str, ClassificationResult] = {}
 
     def _refresh_applied_companies(self, force: bool = False) -> Dict[str, Dict[str, Any]]:
         if self._comp_map is not None and not force:
@@ -62,16 +70,28 @@ class ApplicationClusterer:
         folder: str = "Bewerbung",
         enable_llm_fallback: bool = False,
     ) -> Dict[str, Any]:
-        """Classifies a single email, normalizes entities, and merges into canonical application."""
+        """Classifies a single email, normalizes entities, and merges into canonical application.
+
+        If a batched LLM classification was pre-computed for this entry_id (one
+        shared API call), it is used instead of issuing a fresh per-email LLM call.
+        """
         comp_map = self._refresh_applied_companies()
 
-        classification = self.classifier.classify(
-            subject=record.subject,
-            body=record.body,
-            sender_name=record.sender_name,
-            sender_email=record.sender_email,
-            enable_llm_fallback=enable_llm_fallback,
-        )
+        cached = self._batch_llm_results.get(record.entry_id)
+        if cached is not None:
+            classification = cached
+        else:
+            classification = self.classifier.classify(
+                subject=record.subject,
+                body=record.body,
+                sender_name=record.sender_name,
+                sender_email=record.sender_email,
+                enable_llm_fallback=enable_llm_fallback,
+            )
+
+        # When a batched LLM result is available, skip the slow per-email role LLM
+        # fallback too — the batch already decided the role/company semantics.
+        role_llm_ok = enable_llm_fallback and cached is None
 
         effective_folder = (getattr(record, "folder", None) or folder).strip()
         is_inbox_folder = effective_folder.lower() == "inbox"
@@ -126,7 +146,7 @@ class ApplicationClusterer:
             if not canon_role:
                 from src.core.storage import UNKNOWN_ROLE
                 from src.tools.role_extractor import extract_role_from_context
-                cand_role = extract_role_from_context(record.subject, record.body, use_llm=enable_llm_fallback)
+                cand_role = extract_role_from_context(record.subject, record.body, use_llm=role_llm_ok)
                 if cand_role and cand_role != UNKNOWN_ROLE:
                     cand_role = re.sub(r"\s+(?:bei|at|für|fuer)\s+.*$", "", cand_role, flags=re.IGNORECASE)
                     canon_role = normalize_role_title(cand_role)
@@ -239,6 +259,119 @@ class ApplicationClusterer:
             "interview_alert": interview_alert,
         }
 
+    def batch_llm_classify(
+        self,
+        records: List[EmailRecord],
+        enable_llm_fallback: bool = False,
+    ) -> None:
+        """Classifies the ambiguous remainder of a batch in ONE combined LLM call.
+
+        Emails that the deterministic classifier would send to its LLM tier are
+        collected and sent together as a single JSON-array prompt. Each result is
+        cached by entry_id so process_email reuses it — never a per-email round
+        trip. Falls back silently to per-email classification if the batch call
+        is unavailable or fails.
+        """
+        if not enable_llm_fallback:
+            return
+        if not records:
+            return
+        try:
+            import os
+            if not os.getenv("GEMINI_API_KEY"):
+                return
+            from src.core.llm_provider import call_gemini_semantic_analysis
+            from src.utils.prompt_loader import load_prompt
+        except Exception as e:
+            log.debug("Batch LLM not available: %s", e)
+            return
+
+        # Quick deterministic pass: only emails that WOULD go to the LLM tier
+        # (i.e. career-context but low-confidence rules) are batched.
+        candidates: List[EmailRecord] = []
+        for rec in records:
+            fast = self.classifier.classify(
+                subject=rec.subject,
+                body=rec.body,
+                sender_name=rec.sender_name,
+                sender_email=rec.sender_email,
+                enable_llm_fallback=False,
+            )
+            if fast.category in ("follow_up", "noise") and fast.confidence < 0.8:
+                # ambiguous under pure rules -> let the batched LLM decide
+                candidates.append(rec)
+
+        if not candidates:
+            return
+
+        emails_payload = []
+        for rec in candidates:
+            emails_payload.append(
+                {
+                    "entry_id": rec.entry_id,
+                    "sender_name": rec.sender_name,
+                    "sender_email": rec.sender_email,
+                    "subject": rec.subject,
+                    "body": rec.body[:1500],
+                }
+            )
+
+        try:
+            prompt_template = load_prompt("email_classifier_batch.txt")
+            prompt = prompt_template.replace("{{emails}}", json.dumps(emails_payload, ensure_ascii=False))
+        except Exception:
+            prompt = (
+                "You are an expert recruitment triage assistant. Classify each email below. "
+                "Return ONLY a JSON array, one object per email, each with keys: "
+                "entry_id, category (interview_invitation|application_confirmation|rejection|follow_up|noise|verification), "
+                "confidence (0-1), matched_company, matched_role, meeting_link, suggested_date, reasoning.\n\n"
+                f"Emails:\n{json.dumps(emails_payload, ensure_ascii=False)}"
+            )
+
+        res_text = call_gemini_semantic_analysis(prompt)
+        if not res_text:
+            return
+
+        cleaned = res_text.strip()
+        for fence in ("```json", "```"):
+            if fence in cleaned:
+                cleaned = cleaned.split(fence)[1].split("```")[0].strip()
+                break
+        try:
+            parsed_list = json.loads(cleaned)
+        except Exception as e:
+            log.warning("Batch LLM response not parseable: %s", e)
+            return
+        if not isinstance(parsed_list, list):
+            return
+
+        valid_cats = {"interview_invitation", "application_confirmation", "rejection", "follow_up", "noise", "verification"}
+        for item in parsed_list:
+            if not isinstance(item, dict) or not item.get("entry_id"):
+                continue
+            cat = item.get("category")
+            if cat not in valid_cats:
+                cat = "noise"
+            try:
+                conf = float(item.get("confidence", 0.9))
+                if conf > 1.0:
+                    conf /= 100.0
+            except (TypeError, ValueError):
+                conf = 0.9
+            reasoning = item.get("reasoning") or item.get("explanation") or "Classified via batched LLM"
+            self._batch_llm_results[item["entry_id"]] = ClassificationResult(
+                category=cat,
+                confidence=conf,
+                matched_company=item.get("matched_company") or None,
+                matched_role=item.get("matched_role") or None,
+                meeting_link=self.classifier.extract_meeting_link(item.get("meeting_link") or "") or None,
+                suggested_date=item.get("suggested_date") or None,
+                explanation=reasoning,
+                intent=cat,
+                reasoning=reasoning,
+            )
+        log.info("Batched LLM classified %d ambiguous emails in 1 call", len(self._batch_llm_results))
+
     def cluster_batch(
         self,
         records: List[EmailRecord],
@@ -246,6 +379,10 @@ class ApplicationClusterer:
         enable_llm_fallback: bool = False,
     ) -> Dict[str, Any]:
         """Clusters a collection of emails into deduplicated canonical applications."""
+        # Batched LLM tier: classify ambiguous remainder in ONE combined call.
+        self._batch_llm_results = {}
+        self.batch_llm_classify(records, enable_llm_fallback)
+
         summary = {
             "total_processed": 0,
             "confirmations": 0,

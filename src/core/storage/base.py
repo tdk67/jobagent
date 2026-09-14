@@ -37,6 +37,24 @@ class BaseStorage:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def get_setting(self, key: str) -> Optional[str]:
+        """Reads a runtime key from agent_kv (None if absent)."""
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT value FROM agent_kv WHERE key = ?", (key,)).fetchone()
+        return str(row[0]) if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        """Upserts a runtime key into agent_kv."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            conn.execute(
+                "INSERT INTO agent_kv (key, value, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                (key, value, now),
+            )
+            conn.commit()
+
     def _init_db(self) -> None:
         """Initializes database tables using the versioned migration framework."""
         run_migrations(self.db_path)

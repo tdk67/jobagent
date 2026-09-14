@@ -71,7 +71,10 @@ def test_job_archive_engine(tmp_path: Path):
     )
 
     assert res["application_id"] > 0
-    assert Path(res["markdown_path"]).exists()
+    # Markdown content is stored in the DB (not a file) — verify DB holds it.
+    assert res["markdown_path"] == "stored_in_db"
+    app_md = storage.get_application_by_company("FutureTech GmbH")
+    assert app_md is not None and (app_md.get("job_description_md") or "")
     assert res["snapshot_pdf_path"] is not None
     assert Path(res["snapshot_pdf_path"]).exists()
     assert Path(res["snapshot_pdf_path"]).stat().st_size > 1000
