@@ -134,7 +134,7 @@
         if (metaCompany && (!isLinkedIn || metaCompany.toLowerCase() !== "linkedin")) {
           company = metaCompany;
         } else {
-          const parts = document.title.split(/[-–|·]|\bat\b|@/i).map((p) => p.trim()).filter(Boolean);
+          const parts = document.title.split(/\s+[-–|·]\s+|\bat\b|@/i).map((p) => p.trim()).filter(Boolean);
           if (isLinkedIn && parts.length >= 3 && parts[parts.length - 1].toLowerCase().includes("linkedin")) {
             company = parts[parts.length - 2];
           } else if (parts.length > 1) {
@@ -146,7 +146,7 @@
 
       const title =
         document.querySelector(".job-details-jobs-unified-top-card__job-title, .jobs-unified-top-card__job-title, h1.t-24, h1")?.innerText?.trim() ||
-        document.title.split(/[-–|·]|\bat\b|@/i)[0]?.trim() ||
+        document.title.split(/\s+[-–|·]\s+|\bat\b|@/i)[0]?.trim() ||
         document.title;
 
       sendResponse({ title, company: company || "Company", html: document.body.innerHTML });

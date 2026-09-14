@@ -179,7 +179,7 @@
       if (h1 && h1.innerText && h1.innerText.length > 3) {
         jobTitle = cleanText(h1.innerText);
       } else if (doc.title) {
-        jobTitle = cleanText(doc.title.split("|")[0].split("•")[0].split("-")[0]);
+        jobTitle = cleanText(doc.title.split(/\||•|\s+[-–]\s+/)[0]);
       }
     }
 
