@@ -117,6 +117,9 @@ source .venv/bin/activate
 # Install dependencies and Playwright browser engine
 pip install -r requirements.txt
 playwright install chromium
+
+# Download ML model weights (from GitHub Releases)
+python scripts/download_models.py
 ```
 
 ### 2. Configure Credentials & Personal Profile
