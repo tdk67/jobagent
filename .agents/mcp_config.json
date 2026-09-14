@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "jobagent": {
+      "command": "C:\\Data\\work\\jobagent\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "src.a2a.mcp_server"],
+      "cwd": "C:\\Data\\work\\jobagent"
+    }
+  }
+}

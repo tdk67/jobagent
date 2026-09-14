@@ -357,6 +357,10 @@ def cmd_mcp() -> None:
     print("Starting JobAgent FastMCP server...")
     mcp.run()
 
+def cmd_sync_to_vps(url: str, token: str) -> None:
+    from src.a2a.sync_client import JobAgentSyncClient
+    client = JobAgentSyncClient(target_url=url, token=token)
+    client.push_to_vps()
 
 def main():
     parser = argparse.ArgumentParser(description="JobAgent CLI")
@@ -389,6 +393,8 @@ def main():
     parser.add_argument("--company", type=str, default="Unternehmen", help="Target company name for cover letter")
     parser.add_argument("--role", type=str, default=None, help="Target job title/role for cover letter")
     parser.add_argument("--lang", type=str, default="de", choices=["de", "en"], help="Language for cover letter (de or en)")
+    parser.add_argument("--sync-to-vps", type=str, default=None, help="Securely sync local personal data to a remote VPS JobAgent instance (requires HTTPS URL)")
+    parser.add_argument("--token", type=str, default=None, help="API Token for VPS Sync authentication")
     args = parser.parse_args()
 
     cfg = load_config()
@@ -428,6 +434,11 @@ def main():
         cmd_server(args, cfg)
     elif args.mcp:
         cmd_mcp()
+    elif args.sync_to_vps:
+        if not args.token:
+            print("[-] Error: --token is required for secure VPS sync.")
+            return
+        cmd_sync_to_vps(args.sync_to_vps, args.token)
     else:
         parser.print_help()
 

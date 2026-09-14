@@ -68,6 +68,7 @@ class ApplicationRepo(BaseStorage):
         location: Optional[str] = None,
         salary_info: Optional[str] = None,
         notes: Optional[str] = None,
+        job_description_md: Optional[str] = None,
     ) -> Optional[int]:
         """Inserts or updates a job application with canonical company deduplication.
         Filters aggregator noise (LinkedIn, BambooHR) and merges duplicate legal forms (GmbH, AG).
@@ -174,20 +175,22 @@ class ApplicationRepo(BaseStorage):
                         source = COALESCE(?, source), job_url = COALESCE(?, job_url),
                         location = CASE WHEN ? IS NOT NULL AND ? != '—' AND ? != '' THEN ? ELSE location END,
                         salary_info = COALESCE(?, salary_info),
-                        notes = COALESCE(?, notes), updated_at = ?
+                        notes = COALESCE(?, notes),
+                        job_description_md = COALESCE(?, job_description_md),
+                        updated_at = ?
                     WHERE id = ?
                     """,
-                    (canon_company, new_role, new_status, earliest_date, source, job_url, location, location, location, location, salary_info, notes, now, app_id),
+                    (canon_company, new_role, new_status, earliest_date, source, job_url, location, location, location, location, salary_info, notes, job_description_md, now, app_id),
                 )
                 conn.commit()
                 return app_id
             else:
                 cursor.execute(
                     """
-                    INSERT INTO applications (company, role, applied_date, status, source, job_url, location, salary_info, notes, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO applications (company, role, applied_date, status, source, job_url, location, salary_info, notes, job_description_md, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (canon_company, canon_role, app_date, status, source, job_url, location, salary_info, notes, now, now),
+                    (canon_company, canon_role, app_date, status, source, job_url, location, salary_info, notes, job_description_md, now, now),
                 )
                 conn.commit()
                 return cursor.lastrowid

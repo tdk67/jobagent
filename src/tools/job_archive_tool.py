@@ -68,9 +68,6 @@ class JobArchiveEngine:
             md_content = f"# {html.escape(role)}\n**Company:** {html.escape(company)}\n**URL:** {html.escape(job_url or 'N/A')}\n\n[Archived via JobAgent]"
             metadata = {"salary": None, "location": None, "work_model": None}
 
-        with open(md_path, "w", encoding="utf-8") as f:
-            f.write(md_content)
-
         # 2. Produce PDF Snapshot
         try:
             if raw_html:
@@ -101,14 +98,15 @@ class JobArchiveEngine:
             job_url=job_url,
             salary_info=metadata.get("salary"),
             location=metadata.get("location") or metadata.get("work_model"),
-            notes=f"Archived: {md_filename}",
+            notes=f"Snapshot: {pdf_filename}" if pdf_full_path else None,
+            job_description_md=md_content,
         )
 
         return {
             "application_id": app_id,
             "company": company,
             "role": role,
-            "markdown_path": str(md_path.resolve()),
+            "markdown_path": "stored_in_db",
             "snapshot_pdf_path": pdf_full_path,
             "metadata": metadata,
         }

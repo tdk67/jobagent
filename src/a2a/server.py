@@ -12,6 +12,9 @@ import json
 import logging
 import os
 import secrets
+import shutil
+import zipfile
+import io
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -540,5 +543,39 @@ def create_a2a_app(
     @app.post("/api/v1/emails/{entry_id}/open", dependencies=[Depends(verify_token_or_loopback)])
     async def open_email_in_desktop(entry_id: str) -> Dict[str, Any]:
         return svc.emails.open_email_in_desktop(entry_id)
+
+    # 8. Sync Endpoints
+    @app.post("/a2a/v1/sync/push", dependencies=[Depends(verify_token)])
+    async def sync_push(request: Request) -> Dict[str, Any]:
+        body = await request.body()
+        if not body:
+            raise HTTPException(status_code=400, detail="Empty payload")
+
+        buf = io.BytesIO(body)
+        try:
+            with zipfile.ZipFile(buf, "r") as zf:
+                # Basic validation: ensure data/ or profile.local.json exists
+                names = zf.namelist()
+                if not any(name == "profile.local.json" or name.startswith("jobagent.db") for name in names):
+                    raise HTTPException(status_code=400, detail="Invalid sync payload")
+
+                # Backup current data
+                if Path("data").exists():
+                    backup_path = Path(f"data_backup_{int(datetime.now().timestamp())}")
+                    shutil.move("data", str(backup_path))
+                
+                # Extract new data
+                for name in names:
+                    if name == "profile.local.json":
+                        zf.extract(name, ".")
+                    else:
+                        zf.extract(name, "data")
+                        
+            return {"status": "success", "message": f"Successfully synchronized {len(names)} files"}
+        except zipfile.BadZipFile:
+            raise HTTPException(status_code=400, detail="Invalid zip payload")
+        except Exception as e:
+            log.error(f"Sync failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
     return app
