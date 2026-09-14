@@ -97,35 +97,42 @@ def resolve_key(arg: str) -> Path:
 
 
 def transfer_via_tar(staging: Path, dest: str, key: Path, port: int, dry: bool) -> subprocess.CompletedProcess:
-    """No-rsync transfer: tar the staging dir, pipe over ssh to untar on the VPS."""
-    # Windows tar is bsdtar — flags are compatible (-c -f -).
+    """No-rsync transfer: tar the staging dir to a temp .tar file, then scp it
+    to the VPS and untar remotely. Avoids fragile cross-process pipes (the
+    threading error you saw) and works on stock Windows (bsdtar + scp)."""
     tar_cmd = shutil.which("tar") or "tar"
+    scp_cmd = shutil.which("scp") or "scp"
     ssh_cmd = shutil.which("ssh") or "ssh"
-    remote_sh = (
-        f"mkdir -p {VPS_INCOMING} && tar -x -f - -C {VPS_INCOMING}"
-    )
-    pipe = [
-        f"{tar_cmd}", "-c", "-f", "-", "-C", str(staging), ".",
-    ]
-    ssh = [
-        f"{ssh_cmd}", "-i", str(key), "-p", str(port),
-        "-o", "StrictHostKeyChecking=accept-new", f"{dest}", remote_sh,
-    ]
-    if dry:
-        log("$ " + " ".join(pipe) + " | " + " ".join(ssh))
-        return subprocess.CompletedProcess(pipe + ssh, 0)
-    # Piping: python subprocess two procs connected by pipe, or simply
-    # use a single `sh -c 'tar ... | ssh ...'` on non-Windows; on Windows we
-    # chain via shell=True string. Safest cross-platform: run tar with stdout
-    # captured, feed bytes into ssh's stdin.
-    log("$ (tar) → (ssh untar)")
-    t = subprocess.Popen(pipe, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    s = subprocess.Popen(ssh, stdin=t.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    if t.stdout:
-        t.stdout.close()
-    s_out, s_err = s.communicate(timeout=300)
-    t.communicate(timeout=300)
-    return subprocess.CompletedProcess(pipe + ssh, s.returncode, stdout=s_out, stderr=(s_err or b""))
+
+    with tempfile.TemporaryDirectory(prefix="jobagent-tar-") as tmp:
+        tar_file = Path(tmp) / "incoming.tar"
+        make_tar = [tar_cmd, "-c", "-f", str(tar_file), "-C", str(staging), "."]
+        if dry:
+            log("$ " + " ".join(make_tar))
+            return subprocess.CompletedProcess(make_tar, 0)
+        r = run(make_tar, dry, check_out=False)
+        if r.returncode != 0:
+            return r
+
+        remote_tar = f"{VPS_INCOMING}/incoming.tar"
+        scp_cmd_full = [
+            scp_cmd, "-i", str(key), "-P", str(port),
+            "-o", "StrictHostKeyChecking=accept-new",
+            str(tar_file), f"{dest}:{remote_tar}",
+        ]
+        if dry:
+            log("$ " + " ".join(scp_cmd_full))
+            return subprocess.CompletedProcess(scp_cmd_full, 0)
+        r2 = run(scp_cmd_full, dry, check_out=False)
+        if r2.returncode != 0:
+            return r2
+
+        untar = [
+            ssh_cmd, "-i", str(key), "-p", str(port),
+            "-o", "StrictHostKeyChecking=accept-new", dest,
+            f"mkdir -p {VPS_INCOMING} && tar -x -f {remote_tar} -C {VPS_INCOMING} && rm -f {remote_tar}",
+        ]
+        return run(untar, dry, check_out=False)
 
 
 def transfer_via_rsync(staging: Path, dest: str, key: Path, port: int, dry_run: bool) -> subprocess.CompletedProcess:
