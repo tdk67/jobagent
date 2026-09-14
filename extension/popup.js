@@ -275,7 +275,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           });
 
           if (archiveRes.ok) {
-            resultBox.textContent = `Archived! Markdown & visual PDF snapshot saved.`;
+            resultBox.textContent = `✅ Archived! Job description saved to CRM database.`;
             resultBox.className = "result-box";
           } else {
             resultBox.textContent = "Failed to archive posting (backend error).";

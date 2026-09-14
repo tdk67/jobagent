@@ -64,7 +64,7 @@ JobAgent is a local-first AI career agent built with the AWS Strands Agents SDK.
 
 ## Available Tools
 - jobagent_triage_inbox: Scans connected inboxes (Desktop Outlook MAPI, Gmail MCP, generic IMAP). Supports start_date and end_date parameters to process emails week-by-week.
-- jobagent_archive_posting: Archives job URL or raw HTML into clean Markdown and high-res PDF snapshot.
+- jobagent_archive_posting: Archives job URL or raw HTML into clean Markdown stored in the local CRM database.
 - jobagent_get_interviews: Retrieves scheduled hiring interviews, notes, and verified meeting links.
 - jobagent_generate_compliance_report: Compiles official statutory proof tables (German AfA table) or KPI dashboards. Supports start_date, end_date, and weekly parameters.
 - jobagent_query_qa_memory: Retrieves verified candidate answers for screening questions.
@@ -243,14 +243,14 @@ def create_a2a_app(
             A2ACapability(
                 id="archive_job",
                 name="Archive Job Posting",
-                description="Preserves posting as clean Markdown and high-resolution PDF snapshot.",
+                description="Preserves posting as clean Markdown stored in the local CRM database.",
                 parameters_schema={
                     "company": {"type": "string"},
                     "role": {"type": "string"},
                     "job_url": {"type": "string", "optional": True},
                     "raw_html": {"type": "string", "optional": True},
                 },
-                returns_schema={"markdown_path": "string", "snapshot_pdf_path": "string"},
+                returns_schema={"application_id": "int", "markdown_stored": "bool", "md_preview": "string"},
             ),
             A2ACapability(
                 id="generate_compliance_report",
@@ -306,11 +306,7 @@ def create_a2a_app(
                     raw_html=payload.get("raw_html"),
                     qa_pairs=payload.get("qa_pairs"),
                 )
-                artifacts = []
-                if res.get("snapshot_pdf_path"):
-                    artifacts.append(res["snapshot_pdf_path"])
-                if res.get("markdown_path"):
-                    artifacts.append(res["markdown_path"])
+                artifacts = [f"db://applications/{res['application_id']}/job_description"] if res.get("application_id") else []
                 return TaskResponse(task_id=envelope.task_id, status="completed", result=res, artifacts=artifacts)
 
             elif action == "generate_compliance_report":
@@ -414,16 +410,29 @@ def create_a2a_app(
             raw_html=payload.get("html"),
         )
 
-    @app.get("/api/v1/archive/content")
-    async def get_archive_content(file: str = "") -> Dict[str, Any]:
-        """Safely returns the content of an archived job description snapshot."""
-        clean_name = Path(file).name
-        if not clean_name:
-            return {"status": "error", "content": "No archive file specified."}
-        p = (Path("data/archives") / clean_name).resolve()
-        if p.exists() and p.is_file() and p.parent.resolve() == Path("data/archives").resolve():
-            return {"status": "ok", "filename": clean_name, "content": p.read_text(encoding="utf-8", errors="replace")}
-        return {"status": "error", "filename": clean_name, "content": f"Archived description '{clean_name}' is not available on disk."}
+    @app.get("/api/v1/applications/{app_id}/job-description", dependencies=[Depends(verify_token)])
+    async def get_job_description(app_id: int) -> Dict[str, Any]:
+        """Returns the stored Markdown job description for a given application from the local CRM database."""
+        try:
+            with svc.applications.storage._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT company, role, job_description_md FROM applications WHERE id = ?",
+                    (app_id,),
+                ).fetchone()
+            if row and row["job_description_md"]:
+                return {
+                    "status": "ok",
+                    "application_id": app_id,
+                    "company": row["company"],
+                    "role": row["role"],
+                    "content": row["job_description_md"],
+                }
+            if row:
+                return {"status": "error", "content": "No job description stored for this application."}
+            return {"status": "error", "content": "Application not found."}
+        except Exception as exc:
+            log.warning("Job description lookup failed for app %d: %s", app_id, exc)
+            return {"status": "error", "content": "Database error looking up job description."}
 
     @app.get("/api/v1/qa", dependencies=[Depends(verify_token)])
     async def extension_query_qa(question: str) -> Dict[str, Any]:

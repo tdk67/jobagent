@@ -17,7 +17,7 @@ Job hunting is an exhausting, fragmented process. Job seekers apply across dozen
 - Tedious statutory reporting obligations—such as the mandatory German **Agentur für Arbeit** proof of active job search (*Nachweis über Eigenbemühungen*, § 138 SGB III).
 
 **JobAgent** runs locally on your computer to automate these workflows:
-1. 📸 **Dual-Asset Archiving**: Saves clean Markdown (`jd.md`) for LLM briefings and pixel-perfect visual PDF snapshots (`snapshot.pdf`) before postings are removed.
+1. 📸 **Job Posting Archiving**: Saves clean Markdown for LLM briefings and stores it in the local CRM database before postings are removed.
 2. 📬 **Multi-Protocol Email Ingestion**: Reads Desktop Outlook (MAPI via `pywin32` on Windows), Gmail (via MCP or IMAP), or generic IMAP to automatically track application statuses.
 3. 🎯 **Dual-Signal Interview Detection**: Reconciles incoming emails against your verified application history, semantically filtering out sales pitches and webinars from genuine hiring interviews.
 4. 🏛️ **Statutory Compliance & Reporting**: Automatically compiles official German *Agentur für Arbeit* PDF proof tables and candidate KPI dashboards with custom date filtering and calendar-week slicing.
@@ -51,9 +51,9 @@ Job hunting is an exhausting, fragmented process. Job seekers apply across dozen
     ┌─────────────────────┐            ┌─────────────────────┐           ┌─────────────────────┐
     │  EmailIngestTool    │            │   JobArchiveTool    │           │  ReportRenderTool   │
     │  • Gmail (MCP/IMAP) │            │   • Full-text MD    │           │  • Candidate Dash   │
-    │  • Outlook Desktop  │            │   • Visual PDF Snap │           │  • Headhunter View  │
+    │  • Outlook Desktop  │            │   • SQLite Archive  │           │  • Headhunter View  │
     │  • Generic IMAP     │            │   • Q&A Memory Cache│           │  • AfA German Table │
-    │  • Dual-Signal Det. │            │   • Salary & Notes  │           │  • Playwright PDF   │
+    │  • Dual-Signal Det. │            │   • Salary & Notes  │           │  • WeasyPrint PDF   │
     └──────────┬──────────┘            └──────────┬──────────┘           └──────────┬──────────┘
                │                                  │                                 │
                └──────────────────────────┬───────┴─────────────────────────────────┘
@@ -114,9 +114,8 @@ python -m venv .venv
 # On Linux/macOS:
 source .venv/bin/activate
 
-# Install dependencies and Playwright browser engine
+# Install dependencies
 pip install -r requirements.txt
-playwright install chromium
 
 # Download ML model weights (from GitHub Releases)
 python scripts/download_models.py
@@ -187,8 +186,7 @@ The extension integrates JobAgent directly into your browser while you apply for
 
 #### Applying for Jobs with the Extension:
 - **1-Click Posting Archiving**: Whenever you view an interesting job opening on LinkedIn, StepStone, Personio, Greenhouse, or any company page, open the JobAgent extension popup and click **"Archive Job Posting"**.
-  - Automatically captures the job description in clean Markdown (`data/archives/<company>_<role>/jd.md`).
-  - Captures a high-resolution visual snapshot (`snapshot.pdf`).
+  - Automatically captures the job description in clean Markdown and stores it in the local CRM database.
   - Registers the application in your local CRM database (`data/jobagent.db`).
 - **Private Form Assistant**: When filling out long application forms, click the extension's **"Smart Autofill"** to retrieve matching answers from your `profile.local.json` and canonical Q&A memory. Sensitive data (passwords, bank accounts) are never filled or cached.
 
@@ -310,7 +308,7 @@ JobAgent is built as a **hybrid system** that serves both human job seekers and 
 ### 1. Interfaces for Human Users
 - **Chrome Copilot Extension (`extension/`)**: 
   - Visual popup in Chrome/Edge/Brave.
-  - One-click job posting archiver (saves clean Markdown + visual PDF snapshot).
+  - One-click job posting archiver (saves clean Markdown directly to local CRM database).
   - Private form auto-fill assistant using local profile memory without leaking PII.
 - **Interactive Visual Dashboards (`output/*.html`)**:
   - Open `output/dashboard_report.html` in your browser for responsive KPI charts, funnel analysis, and interview cards.
