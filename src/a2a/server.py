@@ -284,7 +284,8 @@ def create_a2a_app(
         try:
             if action == "triage_emails":
                 limit = payload.get("limit", 50)
-                res = svc.emails.triage_inbox(
+                res = await asyncio.to_thread(
+                    svc.emails.triage_inbox,
                     limit=limit,
                     start_date=payload.get("start_date"),
                     end_date=payload.get("end_date"),
@@ -297,7 +298,8 @@ def create_a2a_app(
                 return TaskResponse(task_id=envelope.task_id, status="completed", result=res)
 
             elif action == "archive_job":
-                res = svc.archives.archive(
+                res = await asyncio.to_thread(
+                    svc.archives.archive,
                     company=payload.get("company", "Unknown Company"),
                     role=payload.get("role", "Software Engineer"),
                     job_url=payload.get("job_url"),
@@ -313,7 +315,8 @@ def create_a2a_app(
 
             elif action == "generate_compliance_report":
                 report_type = payload.get("report_type", "dashboard")
-                res = svc.reports.generate(
+                res = await asyncio.to_thread(
+                    svc.reports.generate,
                     view_type=report_type,
                     export_pdf=True,
                     start_date=payload.get("start_date"),
