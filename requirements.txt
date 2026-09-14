@@ -4,6 +4,7 @@ strands-agents-tools>=0.1.0
 
 # LLM Providers
 google-genai>=0.1.0
+ollama>=0.2.0
 python-dotenv>=1.0.0
 
 # Browser Automation & PDF Generation

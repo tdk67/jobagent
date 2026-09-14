@@ -5,7 +5,8 @@
     "model": "gemini-3.8-flash",
     "fallback_provider": "bedrock",
     "fallback_model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
-    "temperature": 0.1
+    "temperature": 0.1,
+    "_note": "To run completely locally with no cloud PII leakage, set provider to 'ollama' and model to 'llama3'"
   },
 
   "a2a": {

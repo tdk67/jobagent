@@ -207,6 +207,29 @@ class JobAgentCoordinator:
                     log.warning("Failed to initialize BedrockModel: %s", e, exc_info=True)
                     model_obj = None
 
+        # 3. Check Ollama Provider (local-first fallback or primary)
+        if model_obj is None:
+            if (
+                self.config.agent.provider == "ollama"
+                or self.config.agent.fallback_provider == "ollama"
+            ):
+                try:
+                    from src.core.llm_provider import create_strands_ollama_model
+                    ollama_id = (
+                        self.config.agent.model
+                        if self.config.agent.provider == "ollama"
+                        else self.config.agent.fallback_model
+                    )
+                    model_obj = create_strands_ollama_model(config=self.config, model_id=ollama_id)
+                    llm_available = True
+                    log.info("Initialized OllamaModel with model %s", ollama_id)
+                except ImportError as e:
+                    log.warning("Failed to initialize OllamaModel: %s", e)
+                    model_obj = None
+                except Exception as e:
+                    log.warning("Failed to initialize OllamaModel: %s", e, exc_info=True)
+                    model_obj = None
+
         self.llm_available = llm_available
         if not self.llm_available:
             log.warning(

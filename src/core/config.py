@@ -26,6 +26,8 @@ log = logging.getLogger(__name__)
 
 class AgentConfig(BaseModel):
     name: str = "JobAgent"
+    # Supported providers: 'gemini', 'bedrock', 'ollama'
+    # For Ollama, you might use model: 'llama3' or 'phi3'
     provider: str = "gemini"
     model: str = "gemini-3.8-flash"
     fallback_provider: str = "bedrock"

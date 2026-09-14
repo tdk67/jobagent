@@ -423,7 +423,21 @@ Test coverage includes:
 
 - **100% Local Storage**: All relational application data, interview records, full-page visual PDF snapshots, and candidate profiles are stored strictly on your local machine (`data/jobagent.db`, `data/snapshots/`, `data/archives/`).
 - **No Cloud Database**: No user data or credentials are ever sent to an external database.
-- **LLM Inference Leaves the Machine**: Storage is 100% local, but LLM inference (Gemini or Bedrock) necessarily sends the profile context needed for form reasoning and email classification to the configured provider. Only the data needed for the task is included; inference never stores your data on the provider side.
+- **LLM Inference Leaves the Machine**: Storage is 100% local, but default LLM inference (Gemini or Bedrock) necessarily sends the profile context needed for form reasoning and email classification to the configured provider. Only the data needed for the task is included; inference never stores your data on the provider side.
+- **True Local Execution (Ollama)**: If you have a powerful machine (e.g., Apple Silicon Mac, or a PC with a dedicated GPU), you can configure JobAgent to use **Ollama** instead of Gemini. This guarantees that **no sensitive emails or profile data ever leave your machine**, fulfilling the true zero-cloud privacy promise.
+
+### How to use Ollama with JobAgent:
+1. Install [Ollama](https://ollama.com/) on your machine.
+2. Pull a recommended model (e.g., `ollama pull llama3.2:1b` or `phi3`).
+3. In your `config.local.json`, set:
+   ```json
+   "agent": {
+     "provider": "ollama",
+     "model": "llama3.2:1b"
+   }
+   ```
+**Performance Expectation**: Smaller models like `llama3.2:1b` or `phi3:latest` run very fast on standard hardware and are usually sufficient for basic zero-shot classification (e.g., detecting if an email is a rejection). However, for complex semantic extraction, larger models (which require more RAM/VRAM) will be much closer to Gemini-level accuracy. If you notice reduced accuracy with local models, you can easily switch back to `gemini` in your config.
+
 - **Strict PII Protection**: Sensitive form fields (passwords, bank accounts, personal identity numbers) are strictly ignored by the form reasoner and never cached in memory.
 
 ---
